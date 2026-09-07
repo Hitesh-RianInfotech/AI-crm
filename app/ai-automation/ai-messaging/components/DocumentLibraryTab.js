@@ -265,8 +265,7 @@ export default function DocumentLibraryTab({
     }
   }
 
-  const handleToggleActive = async (doc) => {
-    const next = !doc.isActive
+  const handleSetActive = async (doc, next) => {
     setTogglingId(doc._id)
     try {
       const result = await api.put(`${endpoint}/${doc._id}`, { isActive: next })
@@ -274,10 +273,11 @@ export default function DocumentLibraryTab({
         toast.error({ title: 'Error', message: result.error || result.message || 'Unable to update status' })
         return
       }
-
       toast.success({
         title: next ? 'Activated' : 'Deactivated',
-        message: next ? `"${doc.name}" is now the active ${entityLabel}` : `"${doc.name}" is no longer active`,
+        message: next
+          ? (result.message || `"${doc.name}" is now active`)
+          : `"${doc.name}" is no longer active`,
       })
       load()
     } catch {
@@ -381,122 +381,117 @@ export default function DocumentLibraryTab({
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4">
-            {docs.map((d) => (
-              <div
-                key={d._id}
-                className={cn(
-                  'flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-start sm:justify-between',
-                  d.isActive ? 'border-brand/40 bg-brand/5' : 'border-border'
-                )}
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                    <FileText className="h-4.5 w-4.5 text-muted-foreground" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold text-foreground">{d.name}</span>
-                      {d.isActive && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
-                          <CheckCircle className="h-3 w-3" /> Active
-                        </span>
-                      )}
-                      {locationBadgeLabel(d) && (
-                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                          {locationBadgeLabel(d)}
-                        </span>
-                      )}
+            {docs.map((d) => {
+              const isLive = d.isActive && d.embeddingStatus === 'ready'
+              return (
+                <div
+                  key={d._id}
+                  className={cn(
+                    'flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-start sm:justify-between',
+                    isLive ? 'border-brand/40 bg-brand/5' : 'border-border'
+                  )}
+                >
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <FileText className="h-4.5 w-4.5 text-muted-foreground" />
                     </div>
-                    {d.description && (
-                      <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{d.description}</p>
-                    )}
-                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                      <span className="truncate" title={d.originalFileName}>
-                        {d.originalFileName}
-                      </span>
-                      <span aria-hidden>·</span>
-                      <span>{formatFileSize(d.fileSize)}</span>
-                      <span aria-hidden>·</span>
-                      <span>{new Date(d.createdAt).toLocaleDateString()}</span>
-                      {d.uploadedBy?.name && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span>by {d.uploadedBy.name}</span>
-                        </>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-foreground">{d.name}</span>
+                        {isLive && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-xs font-medium text-brand">
+                            <CheckCircle className="h-3 w-3" /> Active
+                          </span>
+                        )}
+                        {locationBadgeLabel(d) && (
+                          <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            {locationBadgeLabel(d)}
+                          </span>
+                        )}
+                      </div>
+                      {d.description && (
+                        <p className="mt-0.5 line-clamp-2 text-sm text-muted-foreground">{d.description}</p>
                       )}
-                    </p>
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                        <span className="truncate" title={d.originalFileName}>
+                          {d.originalFileName}
+                        </span>
+                        <span aria-hidden>·</span>
+                        <span>{formatFileSize(d.fileSize)}</span>
+                        <span aria-hidden>·</span>
+                        <span>{new Date(d.createdAt).toLocaleDateString()}</span>
+                        {d.uploadedBy?.name && (
+                          <>
+                            <span aria-hidden>·</span>
+                            <span>by {d.uploadedBy.name}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                  {/* View */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title="View document"
-                    className="h-8 w-8 p-0"
-                    onClick={() => handleViewFile(d)}
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </Button>
-
-                  {/* Edit */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    title="Edit"
-                    className="h-8 w-8 p-0"
-                    onClick={() => {
-                      setEditingDoc(d)
-                      setDialogOpen(true)
-                    }}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-
-                  {/* Activate / Deactivate */}
-                  {d.isActive ? (
-                    requireActive ? null : (
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="View document"
+                      className="h-8 w-8 p-0"
+                      onClick={() => handleViewFile(d)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="Edit"
+                      className="h-8 w-8 p-0"
+                      onClick={() => {
+                        setEditingDoc(d)
+                        setDialogOpen(true)
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    {isLive && !requireActive && (
                       <Button
                         variant="outline"
                         size="sm"
                         title="Deactivate"
                         className="h-8 w-8 p-0"
-                        onClick={() => handleToggleActive(d)}
+                        onClick={() => handleSetActive(d, false)}
                         disabled={togglingId === d._id}
                       >
                         <Power className="h-3.5 w-3.5" />
                       </Button>
-                    )
-                  ) : (
-                    <Button
-                      variant="gradient"
-                      size="sm"
-                      className="h-8 gap-1.5 px-3 text-xs"
-                      onClick={() => handleToggleActive(d)}
-                      disabled={togglingId === d._id}
-                    >
-                      <CheckCircle className="h-3.5 w-3.5" />
-                      {togglingId === d._id ? 'Activating…' : 'Set active'}
-                    </Button>
-                  )}
-
-                  {/* Delete — hidden for active docs */}
-                  {!d.isActive && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      title="Delete"
-                      className="h-8 w-8 p-0 text-red-500 hover:border-red-300 hover:text-red-600"
-                      onClick={() => handleDelete(d)}
-                      disabled={deletingId === d._id}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
+                    )}
+                    {!isLive && (
+                      <>
+                        <Button
+                          variant="gradient"
+                          size="sm"
+                          className="h-8 gap-1.5 px-3 text-xs"
+                          onClick={() => handleSetActive(d, true)}
+                          disabled={togglingId === d._id}
+                        >
+                          <CheckCircle className="h-3.5 w-3.5" />
+                          {togglingId === d._id ? 'Activating…' : 'Set active'}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          title="Delete"
+                          className="h-8 w-8 p-0 text-red-500 hover:border-red-300 hover:text-red-600"
+                          onClick={() => handleDelete(d)}
+                          disabled={deletingId === d._id}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
 
