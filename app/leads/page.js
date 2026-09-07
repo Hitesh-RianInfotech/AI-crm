@@ -31,6 +31,7 @@ import api from '@/lib/api'
 import { toast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 import GlobalLoader from '@/components/shared/GlobalLoader'
+import { RowsPerPage } from '@/components/shared/RowsPerPage'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { buildLeadQueryParams, filtersToConditionsForForm } from '@/lib/lead-filter-fields'
 import { formatReasonLabel } from '@/lib/dynamic-list-normalize'
@@ -62,7 +63,7 @@ const LEAD_CSV_FIELDS = [
   { key: 'createdAt', header: 'createdat', sample: '2026-01-01' },
 ]
 
-const ROWS_PER_PAGE = 10
+const DEFAULT_ROWS_PER_PAGE = 50
 
 function toRecipientLead(lead) {
   if (!lead?._id) return null
@@ -85,6 +86,7 @@ export default function LeadsPage() {
   const [sendDialogOpen, setSendDialogOpen] = useState(false)
   const [sendChannel, setSendChannel] = useState('SMS')
   const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_ROWS_PER_PAGE)
   const [leads, setLeads] = useState([])
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -105,7 +107,7 @@ export default function LeadsPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const latestRequestRef = useRef(0)
 
-  const totalPages = Math.max(1, Math.ceil((totalCount || 0) / ROWS_PER_PAGE))
+  const totalPages = Math.max(1, Math.ceil((totalCount || 0) / pageSize))
   const pageLeadIds = useMemo(() => leads.map((l) => l._id).filter(Boolean), [leads])
   const allOnPageSelected =
     pageLeadIds.length > 0 && pageLeadIds.every((id) => selectedIds.includes(id))
@@ -116,7 +118,7 @@ export default function LeadsPage() {
     setSelectedLeadsData([])
   }
 
-  const loadLeads = useCallback(async (page, nextFilters) => {
+  const loadLeads = useCallback(async (page, nextFilters, limit) => {
     // Searching fires a new request per change; ignore any response that is no
     // longer the latest so a slow early request can't overwrite newer results.
     const requestId = ++latestRequestRef.current
@@ -127,7 +129,7 @@ export default function LeadsPage() {
       const sanitized = sanitizeLeadFilters(nextFilters)
       const params = buildLeadQueryParams({
         page,
-        limit: ROWS_PER_PAGE,
+        limit,
         filters: sanitized,
       })
 
@@ -138,7 +140,7 @@ export default function LeadsPage() {
         const data = Array.isArray(result.data) ? result.data : result.data?.leads || []
         const pagination = result.pagination ?? result.data?.pagination
         const total = pagination?.total ?? data.length
-        const nextTotalPages = Math.max(1, Math.ceil((total || 0) / ROWS_PER_PAGE))
+        const nextTotalPages = Math.max(1, Math.ceil((total || 0) / limit))
         if (page > nextTotalPages) {
           setCurrentPage(nextTotalPages)
           return
@@ -179,12 +181,12 @@ export default function LeadsPage() {
   }, [loadFilterOptions])
 
   useEffect(() => {
-    loadLeads(currentPage, filters)
-  }, [currentPage, filters, loadLeads])
+    loadLeads(currentPage, filters, pageSize)
+  }, [currentPage, filters, pageSize, loadLeads])
 
   const refreshLeads = useCallback(() => {
-    loadLeads(currentPage, filters)
-  }, [currentPage, filters, loadLeads])
+    loadLeads(currentPage, filters, pageSize)
+  }, [currentPage, filters, pageSize, loadLeads])
 
   const applyFilters = (next) => {
     clearSelection()
@@ -674,25 +676,32 @@ export default function LeadsPage() {
           </Table>
 
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              disabled={currentPage === 1 || loading}
-              className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Previous
-            </button>
+            <RowsPerPage
+              value={pageSize}
+              onChange={(n) => { setPageSize(n); setCurrentPage(1) }}
+              disabled={loading}
+            />
             <span className="text-sm text-muted-foreground">
               Page {currentPage} of {totalPages}
             </span>
-            <button
-              type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              disabled={currentPage === totalPages || loading}
-              className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Next
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1 || loading}
+                className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages || loading}
+                className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         </div>
 

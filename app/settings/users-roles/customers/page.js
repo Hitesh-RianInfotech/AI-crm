@@ -14,6 +14,7 @@ import CustomersFilterPanel from '@/components/customers/CustomersFilterPanel'
 import DynamicListFormDialog from '@/components/dynamic-list/DynamicListFormDialog'
 import DynamicListMemberSendDialog from '@/components/dynamic-list/DynamicListMemberSendDialog'
 import BulkSendActionBar from '@/components/shared/BulkSendActionBar'
+import { RowsPerPage } from '@/components/shared/RowsPerPage'
 import {
   EMPTY_CUSTOMER_FILTERS,
   sanitizeCustomerFilters,
@@ -413,7 +414,7 @@ export default function CustomersPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
-  const limit = 10
+  const [pageSize, setPageSize] = useState(50)
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState(null)
@@ -486,21 +487,21 @@ export default function CustomersPage() {
   useEffect(() => {
     clearSelection()
     setCurrentPage(1)
-  }, [debouncedSearch, teacherFilter, filters])
+  }, [debouncedSearch, teacherFilter, filters, pageSize])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     const sanitized = sanitizeCustomerFilters({ ...filters, search: debouncedSearch, teacherID: teacherFilter })
-    const params = buildCustomerQueryParams({ page: currentPage, limit, filters: sanitized })
+    const params = buildCustomerQueryParams({ page: currentPage, limit: pageSize, filters: sanitized })
     const result = await api.get(`/api/customer?${params}`)
     if (result.success) {
       setCustomers(Array.isArray(result.data) ? result.data : [])
       const t = result.pagination?.total ?? result.total ?? 0
       setTotal(t)
-      setTotalPages(Math.max(1, Math.ceil(t / limit)))
+      setTotalPages(Math.max(1, Math.ceil(t / pageSize)))
     }
     setLoading(false)
-  }, [currentPage, debouncedSearch, teacherFilter, filters])
+  }, [currentPage, debouncedSearch, teacherFilter, filters, pageSize])
 
   useEffect(() => { fetchCustomers() }, [fetchCustomers])
 
@@ -971,18 +972,23 @@ export default function CustomersPage() {
         </div>
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {total > 10 && (
           <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-            <span>{total} customer{total !== 1 ? 's' : ''}</span>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-7 px-2.5 text-[12px]">
-                Previous
-              </Button>
-              <span className="px-2">Page {currentPage} of {totalPages}</span>
-              <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} className="h-7 px-2.5 text-[12px]">
-                Next
-              </Button>
+            <div className="flex items-center gap-3">
+              <span>{total} customer{total !== 1 ? 's' : ''}</span>
+              <RowsPerPage value={pageSize} onChange={setPageSize} disabled={loading} />
             </div>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)} className="h-7 px-2.5 text-[12px]">
+                  Previous
+                </Button>
+                <span className="px-2">Page {currentPage} of {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage((p) => p + 1)} className="h-7 px-2.5 text-[12px]">
+                  Next
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
