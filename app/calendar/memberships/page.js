@@ -87,6 +87,33 @@ export default function MembershipsPage() {
     }
   }
 
+  async function handleDuplicate(membership) {
+    const src = await api.get(`/api/membership/${membership._id}`)
+    if (!src.success) {
+      toast.error('Duplicate failed', { description: src.error })
+      return
+    }
+    const m = src.data
+    const created = await api.post('/api/membership', {
+      membershipName: `${m.membershipName} (Copy)`,
+      description: m.description,
+      sortOrder: m.sortOrder,
+      durationDays: m.durationDays,
+      price: m.price,
+      autoRenew: m.autoRenew,
+      color: m.color,
+      isActive: m.isActive,
+      locationID: (m.locationID || []).map((l) => l?._id ?? l).filter(Boolean),
+      services: (m.services || []).map(({ _id, isChargeable, ...s }) => s),
+    })
+    if (created.success) {
+      toast.success('Membership duplicated')
+      router.push(`/calendar/memberships/${created.data._id}`)
+    } else {
+      toast.error('Duplicate failed', { description: created.error })
+    }
+  }
+
   async function handleToggleStatus(membership) {
     try {
       const result = await api.patch(`/api/membership/${membership._id}/toggle`)
@@ -240,6 +267,7 @@ export default function MembershipsPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => router.push(`/calendar/memberships/${membership._id}`)}>Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDuplicate(membership)}>Duplicate</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleToggleStatus(membership)}>
                               {membership.isActive ? 'Deactivate' : 'Activate'}
                             </DropdownMenuItem>

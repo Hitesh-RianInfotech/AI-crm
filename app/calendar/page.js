@@ -1676,12 +1676,13 @@ function AppointmentTimedEventRows({ event, compact = false }) {
     // history, so `totalSessions - pkgSessionNumber` overstates what's left
     // whenever a migrated package's imported baseline usage has no such
     // history behind it (this is the "11/12 left" that should read "7/12").
-    // sessionsRemaining (the stored, authoritative field — same one the
-    // Enrollments tab and this card's own tooltip already show) is always
-    // at least as accurate, so take whichever is smaller/more conservative
-    // instead of trusting the position-based count outright.
+    // When we know this event's chronological position in the package
+    // (pkgSessionNumber), show the balance *as of this session* — one credit
+    // gone per session, counting down in booking order (45 → 44 → 43 …), so it
+    // tracks the "X Paid" badge beside it session-for-session. Only fall back to
+    // the stored aggregate when the position is unknown.
     const remaining = pkgSessionNumber != null
-      ? Math.min(sessionsRemaining, totalSessions - pkgSessionNumber)
+      ? Math.max(0, totalSessions - pkgSessionNumber)
       : sessionsRemaining;
     return `${remaining}/${totalSessions}`;
   })();

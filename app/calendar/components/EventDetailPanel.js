@@ -561,9 +561,17 @@ function GroupStudentRoster({
       )
     : eligibleToAdd;
 
-  const sellCandidates = allCustomers.filter(
-    (c) => !currentIds.has(String(c._id)),
-  );
+  // "Sell Group Class" is for students who can't already book this event — i.e.
+  // the complement of "Add Student": not enrolled, and holding no active package
+  // or membership with a group-type service covering it.
+  const sellCandidates = allCustomers.filter((c) => {
+    const cid = String(c._id);
+    return (
+      !currentIds.has(cid) &&
+      !groupCustomerIds.has(cid) &&
+      !membershipCustomerIds.has(cid)
+    );
+  });
   const sellFiltered = sellQuery.trim()
     ? sellCandidates.filter((c) =>
         (c.name || c.email || "")
@@ -971,7 +979,7 @@ function GroupStudentRoster({
                   {sellFiltered.length === 0 ? (
                     <p className="px-3 py-2 text-[11px] text-muted-foreground">
                       {sellCandidates.length === 0
-                        ? "All customers are already enrolled"
+                        ? "Every student already has a group package or membership"
                         : "No results"}
                     </p>
                   ) : (
