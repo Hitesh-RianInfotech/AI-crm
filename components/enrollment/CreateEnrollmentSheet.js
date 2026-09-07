@@ -23,7 +23,7 @@ export default function CreateEnrollmentSheet({
 }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [mode, setMode] = useState('package')
+  const [mode, setMode] = useState('service')
   const [selectedCustomerID, setSelectedCustomerID] = useState('')
   const [teacherOptions, setTeacherOptions] = useState([])
   const [customerOptions, setCustomerOptions] = useState([])
@@ -154,7 +154,9 @@ export default function CreateEnrollmentSheet({
 
     const addRes = await api.post('/api/customer-package/add', {
       customerID: resolvedCustomerID,
-      packageID: payload.packageID,
+      packageID: payload.packageID || undefined,
+      label: payload?.label?.trim() || undefined,
+      expiryDays: payload.expiryDays ? Number(payload.expiryDays) : undefined,
       enrollmentID,
       services: (payload.services || []).map((s) => ({
         serviceCode: s.serviceCode,
@@ -287,12 +289,15 @@ export default function CreateEnrollmentSheet({
           <p className="text-[12px] text-muted-foreground mt-1">
             {mode === 'membership'
               ? 'Give this student a recurring membership.'
-              : 'Create enrollment and package in one go.'}
+              : mode === 'service'
+                ? 'Sell services on their own — enrollment and services in one go.'
+                : 'Create enrollment and package in one go.'}
           </p>
           <div className="mt-3 inline-flex rounded-lg border border-border bg-background p-0.5">
             {[
-              { v: 'package', label: 'Package' },
-              { v: 'membership', label: 'Membership' },
+              { v: 'service', label: 'Service' },
+              { v: 'package', label: 'Packages' },
+              { v: 'membership', label: 'Memberships' },
             ].map((opt) => (
               <button
                 key={opt.v}
@@ -310,7 +315,7 @@ export default function CreateEnrollmentSheet({
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          {mode === 'package' ? (
+          {mode !== 'membership' ? (
             <>
               <div className="rounded-xl border border-border bg-card p-3 mb-0">
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Student</p>
@@ -330,7 +335,8 @@ export default function CreateEnrollmentSheet({
 
               <NewEnrollmentPackageInline
                 teacherOptions={teacherOptions}
-                packageTemplates={sellablePackages}
+                serviceOnly={mode === 'service'}
+                packageTemplates={mode === 'service' ? [] : sellablePackages}
                 allowedServiceCodes={allowedServiceCodes}
                 customerID={resolvedCustomerID}
                 locationID={resolvedLocationID}

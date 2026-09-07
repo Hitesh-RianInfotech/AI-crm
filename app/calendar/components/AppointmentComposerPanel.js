@@ -660,39 +660,70 @@ function EnrollmentServiceSelector({
         allServices.some((cat) => cat.serviceCode === s.serviceCode),
     ) ?? [];
 
+  // Enrollments with sessions left for a service in this tab, split by whether
+  // they are a real package or a services-only sale. When the student has both,
+  // each kind gets its own dropdown; otherwise a single one, labelled to match.
+  const bookableEnrollments = activeEnrollments.filter(
+    (e) =>
+      e.package &&
+      (e.package.services ?? []).some(
+        (s) =>
+          s.sessionsRemaining > 0 &&
+          allServices.some((cat) => cat.serviceCode === s.serviceCode),
+      ),
+  );
+  const packageEnrollments = bookableEnrollments.filter((e) => e.package.packageRef);
+  const serviceEnrollments = bookableEnrollments.filter((e) => !e.package.packageRef);
+
+  const handleEnrollmentChange = (v) => {
+    onEnrollmentSelect(v);
+    const enr = bookableEnrollments.find((e) => String(e._id) === v);
+    const svcs = (enr?.package?.services ?? []).filter(
+      (s) => s.sessionsRemaining > 0 && allServices.some((cat) => cat.serviceCode === s.serviceCode),
+    );
+    if (svcs.length === 1) {
+      const info = allServices.find((s) => s.serviceCode === svcs[0].serviceCode);
+      if (info) onServiceSelect(String(info._id), svcs[0].color || info.color);
+    }
+  };
+
+  const packageOptions = packageEnrollments.map((e) => ({
+    value: String(e._id),
+    label: e.package.packageName || "Unnamed Package",
+  }));
+  const serviceOptions = serviceEnrollments.map((e) => {
+    const svcNames = (e.package.services ?? [])
+      .map((s) => s.serviceName || s.serviceCode)
+      .filter(Boolean)
+      .join(", ");
+    return { value: String(e._id), label: e.label || svcNames || "Services" };
+  });
+
   return (
     <div className="space-y-2">
+      {packageEnrollments.length > 0 && (
+        <div>
+          <FieldLabel>Package</FieldLabel>
+          <StyledSelect
+            value={serviceEnrollments.some((e) => String(e._id) === selectedEnrollmentId) ? "" : selectedEnrollmentId}
+            onChange={handleEnrollmentChange}
+            options={packageOptions}
+            placeholder="Select package…"
+          />
+        </div>
+      )}
+      {serviceEnrollments.length > 0 && (
+        <div>
+          <FieldLabel>Services</FieldLabel>
+          <StyledSelect
+            value={packageEnrollments.some((e) => String(e._id) === selectedEnrollmentId) ? "" : selectedEnrollmentId}
+            onChange={handleEnrollmentChange}
+            options={serviceOptions}
+            placeholder="Select service…"
+          />
+        </div>
+      )}
       <div>
-        <FieldLabel>Package</FieldLabel>
-        <StyledSelect
-          value={selectedEnrollmentId}
-          onChange={(v) => {
-            onEnrollmentSelect(v);
-            const enr = activeEnrollments.find((e) => String(e._id) === v);
-            const svcs = (enr?.package?.services ?? []).filter(
-              (s) => s.sessionsRemaining > 0 && allServices.some((cat) => cat.serviceCode === s.serviceCode),
-            );
-            if (svcs.length === 1) {
-              const info = allServices.find((s) => s.serviceCode === svcs[0].serviceCode);
-              if (info) onServiceSelect(String(info._id), svcs[0].color || info.color);
-            }
-          }}
-          options={activeEnrollments
-            .filter(
-              (e) =>
-                e.package &&
-                (e.package.services ?? []).some(
-                  (s) =>
-                    s.sessionsRemaining > 0 &&
-                    allServices.some((cat) => cat.serviceCode === s.serviceCode),
-                ),
-            )
-            .map((e) => ({
-              value: String(e._id),
-              label: e.package.packageName || "Unnamed Package",
-            }))}
-          placeholder="Select package…"
-        />
         <button
           type="button"
           onClick={() => onOpenEnrollmentWizard?.(true)}
@@ -708,7 +739,7 @@ function EnrollmentServiceSelector({
           {/* Services */}
           {enrollmentServices.length === 0 ? (
             <p className="text-[11px] text-muted-foreground px-0.5">
-              No sessions remaining in this package.
+              No sessions remaining in this enrollment.
             </p>
           ) : (
             <div className="space-y-1">

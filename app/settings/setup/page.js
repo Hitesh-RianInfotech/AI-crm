@@ -34,7 +34,59 @@ import ServiceDialog from '@/app/calendar/services/components/ServiceDialog'
 import LessonDialog from '@/app/calendar/lessons/components/LessonDialog'
 import ToDoDialog from '@/app/calendar/todos/components/ToDoDialog'
 
-const ROWS_PER_PAGE = 10
+const ROWS_PER_PAGE = 50
+
+// Fetch a package/membership and POST a copy of it, then open the copy's editor.
+async function duplicateCatalogEntity(kind, id, router) {
+  const isPkg = kind === 'package'
+  const base = isPkg ? '/api/package' : '/api/membership'
+  const nameKey = isPkg ? 'packageName' : 'membershipName'
+  const src = await api.get(`${base}/${id}`)
+  if (!src.success) { toast.error('Duplicate failed', { description: src.error }); return }
+  const s = src.data
+  const common = {
+    [nameKey]: `${s[nameKey]} (Copy)`,
+    description: s.description,
+    sortOrder: s.sortOrder,
+    color: s.color,
+    isActive: s.isActive,
+    locationID: (s.locationID || []).map((l) => l?._id ?? l).filter(Boolean),
+    services: (s.services || []).map(({ _id, isChargeable, ...rest }) => rest),
+  }
+  const payload = isPkg
+    ? { ...common, totalDays: s.totalDays, curriculumID: s.curriculumID?._id ?? s.curriculumID ?? undefined }
+    : { ...common, durationDays: s.durationDays, price: s.price, autoRenew: s.autoRenew }
+  const created = await api.post(base, payload)
+  if (!created.success) { toast.error('Duplicate failed', { description: created.error }); return }
+  toast.success(`${isPkg ? 'Package' : 'Membership'} duplicated`)
+  router.push(`/calendar/${isPkg ? 'packages' : 'memberships'}/${created.data._id}`)
+}
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100]
+
+// Shared table footer: Previous / rows-per-page selector + page counter / Next.
+function PaginationBar({ currentPage, totalPages, loading, pageSize, setPageSize, setCurrentPage }) {
+  const btn = 'inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed'
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+      <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className={btn}>Previous</button>
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          Rows
+          <select
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setCurrentPage(1) }}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-sm text-foreground"
+          >
+            {PAGE_SIZE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+      </div>
+      <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className={btn}>Next</button>
+    </div>
+  )
+}
 
 const TABS = [
   { id: 'services', label: 'Services' },
@@ -132,7 +184,7 @@ function SortableServiceRow({ service, selectedIds, toggleOne, onEdit, onDelete,
   )
 }
 
-function SortablePackageRow({ pkg, selectedIds, toggleOne, onDelete, onToggleStatus, router }) {
+function SortablePackageRow({ pkg, selectedIds, toggleOne, onDelete, onDuplicate, onToggleStatus, router }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pkg._id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
@@ -176,6 +228,7 @@ function SortablePackageRow({ pkg, selectedIds, toggleOne, onDelete, onToggleSta
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => router.push(`/calendar/packages/${pkg._id}`)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onDuplicate(pkg)}>Duplicate</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onToggleStatus(pkg)}>{pkg.isActive ? 'Deactivate' : 'Activate'}</DropdownMenuItem>
             <DropdownMenuItem className="text-destructive" onClick={() => onDelete(pkg)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
@@ -196,13 +249,14 @@ function ServicesTab() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingService, setEditingService] = useState(null)
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
+  const [pageSize, setPageSize] = useState(ROWS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const loadServices = useCallback(async (page, search, type) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(ROWS_PER_PAGE), type })
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize), type })
       if (search) params.set('search', search)
       const result = await api.get(`/api/calendar-service?${params}`)
       if (result.success) {
@@ -218,7 +272,7 @@ function ServicesTab() {
       setLoading(false)
       setSelectedIds([])
     }
-  }, [])
+  }, [pageSize])
 
   useEffect(() => {
     setCurrentPage(1)
@@ -240,7 +294,7 @@ function ServicesTab() {
   }
 
   async function persistOrder(ordered) {
-    const startIndex = (currentPage - 1) * ROWS_PER_PAGE
+    const startIndex = (currentPage - 1) * pageSize
     const result = await api.patch('/api/calendar-service/reorder', {
       order: ordered.map((s) => s._id),
       startIndex,
@@ -375,11 +429,14 @@ function ServicesTab() {
             </Table>
           </DndContext>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-          <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
-        </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          loading={loading}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          setCurrentPage={setCurrentPage}
+        />
       </div>
 
       <ServiceDialog open={dialogOpen} onClose={() => setDialogOpen(false)} service={editingService} onRefresh={() => loadServices(currentPage, searchQuery, serviceType)} />
@@ -397,12 +454,13 @@ function LessonsTab() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingLesson, setEditingLesson] = useState(null)
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
+  const [pageSize, setPageSize] = useState(ROWS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   const loadLessons = useCallback(async (page, search) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(ROWS_PER_PAGE) })
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) })
       if (search) params.set('search', search)
       const result = await api.get(`/api/lesson?${params}`)
       if (result.success) {
@@ -414,7 +472,7 @@ function LessonsTab() {
       }
     } catch { toast.error('Error', { description: 'Unable to load lessons' }) }
     finally { setLoading(false); setSelectedIds([]) }
-  }, [])
+  }, [pageSize])
 
   useEffect(() => { loadLessons(currentPage, searchQuery) }, [currentPage, searchQuery, loadLessons])
 
@@ -521,11 +579,14 @@ function LessonsTab() {
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-          <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
-        </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          loading={loading}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          setCurrentPage={setCurrentPage}
+        />
       </div>
 
       <LessonDialog open={dialogOpen} onClose={() => setDialogOpen(false)} lesson={editingLesson} onRefresh={() => loadLessons(currentPage, searchQuery)} />
@@ -542,13 +603,14 @@ function PackagesTab() {
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState([])
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
+  const [pageSize, setPageSize] = useState(ROWS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const loadPackages = useCallback(async (page, search) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(ROWS_PER_PAGE) })
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) })
       if (search) params.set('search', search)
       const result = await api.get(`/api/package?${params}`)
       if (result.success) {
@@ -559,7 +621,7 @@ function PackagesTab() {
       }
     } catch { toast.error('Error', { description: 'Unable to load packages' }) }
     finally { setLoading(false); setSelectedIds([]) }
-  }, [])
+  }, [pageSize])
 
   useEffect(() => { loadPackages(currentPage, searchQuery) }, [currentPage, searchQuery, loadPackages])
 
@@ -576,7 +638,7 @@ function PackagesTab() {
   }
 
   async function persistOrder(ordered) {
-    const startIndex = (currentPage - 1) * ROWS_PER_PAGE
+    const startIndex = (currentPage - 1) * pageSize
     const result = await api.patch('/api/package/reorder', {
       order: ordered.map((p) => p._id),
       startIndex,
@@ -667,6 +729,7 @@ function PackagesTab() {
                       selectedIds={selectedIds}
                       toggleOne={toggleOne}
                       onDelete={handleDelete}
+                      onDuplicate={(p) => duplicateCatalogEntity('package', p._id, router)}
                       onToggleStatus={handleToggleStatus}
                       router={router}
                     />
@@ -676,17 +739,20 @@ function PackagesTab() {
             </Table>
           </DndContext>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-          <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
-        </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          loading={loading}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          setCurrentPage={setCurrentPage}
+        />
       </div>
     </div>
   )
 }
 
-function SortableMembershipRow({ membership, selectedIds, toggleOne, onDelete, onToggleStatus, router }) {
+function SortableMembershipRow({ membership, selectedIds, toggleOne, onDelete, onDuplicate, onToggleStatus, router }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: membership._id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }
 
@@ -730,6 +796,7 @@ function SortableMembershipRow({ membership, selectedIds, toggleOne, onDelete, o
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => router.push(`/calendar/memberships/${membership._id}`)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onDuplicate(membership)}>Duplicate</DropdownMenuItem>
             <DropdownMenuItem onClick={() => onToggleStatus(membership)}>{membership.isActive ? 'Deactivate' : 'Activate'}</DropdownMenuItem>
             <DropdownMenuItem className="text-destructive" onClick={() => onDelete(membership)}>Delete</DropdownMenuItem>
           </DropdownMenuContent>
@@ -748,13 +815,14 @@ function MembershipsTab() {
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState([])
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
+  const [pageSize, setPageSize] = useState(ROWS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const loadMemberships = useCallback(async (page, search) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(ROWS_PER_PAGE) })
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) })
       if (search) params.set('search', search)
       const result = await api.get(`/api/membership?${params}`)
       if (result.success) {
@@ -765,7 +833,7 @@ function MembershipsTab() {
       }
     } catch { toast.error('Error', { description: 'Unable to load memberships' }) }
     finally { setLoading(false); setSelectedIds([]) }
-  }, [])
+  }, [pageSize])
 
   useEffect(() => { loadMemberships(currentPage, searchQuery) }, [currentPage, searchQuery, loadMemberships])
 
@@ -859,6 +927,7 @@ function MembershipsTab() {
                       selectedIds={selectedIds}
                       toggleOne={toggleOne}
                       onDelete={handleDelete}
+                      onDuplicate={(m) => duplicateCatalogEntity('membership', m._id, router)}
                       onToggleStatus={handleToggleStatus}
                       router={router}
                     />
@@ -868,11 +937,14 @@ function MembershipsTab() {
             </Table>
           </DndContext>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-          <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
-        </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          loading={loading}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          setCurrentPage={setCurrentPage}
+        />
       </div>
     </div>
   )
@@ -888,12 +960,13 @@ function ToDosTab() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTodo, setEditingTodo] = useState(null)
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ROWS_PER_PAGE))
+  const [pageSize, setPageSize] = useState(ROWS_PER_PAGE)
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
 
   const loadTodos = useCallback(async (page, search) => {
     setLoading(true)
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(ROWS_PER_PAGE) })
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) })
       if (search) params.set('search', search)
       const result = await api.get(`/api/todo?${params}`)
       if (result.success) {
@@ -905,7 +978,7 @@ function ToDosTab() {
       }
     } catch { toast.error('Error', { description: 'Unable to load to-dos' }) }
     finally { setLoading(false); setSelectedIds([]) }
-  }, [])
+  }, [pageSize])
 
   useEffect(() => { loadTodos(currentPage, searchQuery) }, [currentPage, searchQuery, loadTodos])
 
@@ -1023,11 +1096,14 @@ function ToDosTab() {
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-border">
-          <button type="button" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1 || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
-          <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
-          <button type="button" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages || loading} className="inline-flex items-center h-8 px-3 rounded-lg border border-border bg-background text-sm font-medium text-foreground hover:bg-muted/40 disabled:opacity-40 disabled:cursor-not-allowed">Next</button>
-        </div>
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          loading={loading}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+          setCurrentPage={setCurrentPage}
+        />
       </div>
 
       <ToDoDialog open={dialogOpen} onClose={() => setDialogOpen(false)} todo={editingTodo} onRefresh={() => loadTodos(currentPage, searchQuery)} />

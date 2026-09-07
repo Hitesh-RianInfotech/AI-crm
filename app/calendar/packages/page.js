@@ -87,6 +87,32 @@ export default function PackagesPage() {
     }
   }
 
+  async function handleDuplicate(pkg) {
+    const src = await api.get(`/api/package/${pkg._id}`)
+    if (!src.success) {
+      toast.error('Duplicate failed', { description: src.error })
+      return
+    }
+    const p = src.data
+    const created = await api.post('/api/package', {
+      packageName: `${p.packageName} (Copy)`,
+      description: p.description,
+      sortOrder: p.sortOrder,
+      totalDays: p.totalDays,
+      color: p.color,
+      curriculumID: p.curriculumID?._id ?? p.curriculumID ?? undefined,
+      isActive: p.isActive,
+      locationID: (p.locationID || []).map((l) => l?._id ?? l).filter(Boolean),
+      services: (p.services || []).map(({ _id, isChargeable, ...s }) => s),
+    })
+    if (created.success) {
+      toast.success('Package duplicated')
+      router.push(`/calendar/packages/${created.data._id}`)
+    } else {
+      toast.error('Duplicate failed', { description: created.error })
+    }
+  }
+
   async function handleToggleStatus(pkg) {
     try {
       const result = await api.patch(`/api/package/${pkg._id}/toggle`)
@@ -240,6 +266,7 @@ export default function PackagesPage() {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => router.push(`/calendar/packages/${pkg._id}`)}>Edit</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDuplicate(pkg)}>Duplicate</DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleToggleStatus(pkg)}>
                               {pkg.isActive ? 'Deactivate' : 'Activate'}
                             </DropdownMenuItem>

@@ -80,6 +80,24 @@ import { extractLeadReasonsList } from "@/lib/workflow-normalize";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+// Short name for an enrollment. A real package uses its template name; a
+// services-only sale ("Services") is named by the service(s) it holds instead.
+function enrollmentDisplayName(enr) {
+  const pkg = enr?.package;
+  if (!pkg) return enr?.label ?? "";
+  if (pkg.packageRef) {
+    return pkg.packageName ?? pkg.packageRef?.packageName ?? enr?.label ?? "";
+  }
+  const svcNames = [
+    ...new Set(
+      (pkg.services ?? [])
+        .map((s) => s.serviceName || s.serviceCode)
+        .filter(Boolean),
+    ),
+  ].join(", ");
+  return enr?.label || svcNames || pkg.packageName || "";
+}
+
 function statusColor(status) {
   return (
     {
@@ -2676,9 +2694,7 @@ function PackagesTab({ customerID, locationID }) {
                     )}
                     <div>
                       <p className="text-[13px] font-semibold text-foreground">
-                        {pkg.packageName ??
-                          pkg.packageRef?.packageName ??
-                          "Package"}
+                        {enrollmentDisplayName(enr) || "Package"}
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
                         Purchased {formatDate(pkg.purchaseDate)}
@@ -4211,11 +4227,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                   const ordinal =
                     ["1st", "2nd", "3rd"][enr.enrollmentNumber - 1] ??
                     `${enr.enrollmentNumber}th`;
-                  const pkgName =
-                    enr.package?.packageName ??
-                    enr.package?.packageRef?.packageName ??
-                    enr.label ??
-                    "";
+                  const pkgName = enrollmentDisplayName(enr);
                   return (
                     <option key={enr._id} value={String(enr._id)}>
                       {ordinal} Enrollment{pkgName ? ` — ${pkgName}` : ""}
@@ -4326,9 +4338,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                         )}
                         <div>
                           <p className="text-[15px] font-bold text-foreground">
-                            {cp.packageName ??
-                              cp.packageRef?.packageName ??
-                              "Package"}
+                            {enrollmentDisplayName(enr) || "Package"}
                           </p>
                           <p className="text-[12px] text-muted-foreground mt-1">
                             Purchased {formatDate(cp.purchaseDate)}
@@ -5817,6 +5827,9 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
   const [mode, setMode] = useState(null); // "pay" | "change-date"
   const [amount, setAmount] = useState(String(outstanding.toFixed(2)));
   const [method, setMethod] = useState("cash");
+  const [paymentDate, setPaymentDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [deviceID, setDeviceID] = useState("");
@@ -5863,6 +5876,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
         amountDue: num,
       }),
       ...(payWithTerminal ? { deviceID } : {}),
+      ...(paymentDate ? { paymentDate } : {}),
     });
     if (res.success) {
       if (res.data?.checkoutUrl) {
@@ -6014,6 +6028,18 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="flex-1 min-w-[130px]">
+            <label className="block text-[10px] font-medium text-muted-foreground mb-1">
+              Payment Date
+            </label>
+            <input
+              type="date"
+              value={paymentDate}
+              max={new Date().toISOString().slice(0, 10)}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-primary"
+            />
           </div>
           <div className="flex flex-col gap-1.5 w-full">
             <WalletShortfallField
@@ -6289,6 +6315,26 @@ function deriveEventStatus(ev) {
   if (ev.endDateTime && new Date(ev.endDateTime) < new Date())
     return "completed";
   return explicit || "scheduled";
+}
+
+// Whether this event's student has actually paid for it. A package charge is
+// only "paid" while the package it draws from is fully collected — a refund that
+// drops paymentStatus below "paid" (or amountCollected below totalPaid) flips
+// the lesson back to Unpaid, matching the calendar.
+function deriveEventPaid(ev) {
+  if (ev.payment?.collected) return true;
+  if (["credits", "direct", "mixed", "membership"].includes(ev.chargeMethod))
+    return true;
+  if (ev.chargeMethod === "package" && ev.packageBillingType !== "flexible") {
+    const charge = (ev.charges || []).find((c) => c.method === "package");
+    const pkg = charge?.enrollmentID?.package ?? charge?.customerPackageID;
+    if (!pkg) return true; // no package data on the payload — stay optimistic
+    if (pkg.paymentStatus) return pkg.paymentStatus === "paid";
+    const collected = Number(pkg.amountCollected ?? 0);
+    const total = Number(pkg.totalPaid ?? 0);
+    return total > 0 && collected >= total;
+  }
+  return false;
 }
 
 function eventStatusBadge(status) {
@@ -7295,14 +7341,7 @@ function LessonsTab({ customer }) {
     .filter((ev) => {
       if (activeFilters.size === 0) return true;
       const status = deriveEventStatus(ev);
-      const isPaid =
-        (ev.chargeMethod === "package" &&
-          ev.packageBillingType !== "flexible") ||
-        ev.chargeMethod === "credits" ||
-        ev.chargeMethod === "direct" ||
-        ev.chargeMethod === "mixed" ||
-        ev.chargeMethod === "membership" ||
-        ev.payment?.collected;
+      const isPaid = deriveEventPaid(ev);
       const isCancelledNoCharge =
         status === "cancelled_no_charge" || status === "no_show_no_charge";
 
@@ -7430,14 +7469,7 @@ function LessonsTab({ customer }) {
             const label = ev.title || ev.calendarServiceID?.name || "Event";
             const serviceCode =
               ev.calendarServiceID?.serviceCode ?? ev.type ?? "";
-            const isPaid =
-              (ev.chargeMethod === "package" &&
-                ev.packageBillingType !== "flexible") ||
-              ev.chargeMethod === "credits" ||
-              ev.chargeMethod === "direct" ||
-              ev.chargeMethod === "mixed" ||
-              ev.chargeMethod === "membership" ||
-              ev.payment?.collected;
+            const isPaid = deriveEventPaid(ev);
             const isCancelledNoCharge =
               status === "cancelled_no_charge" ||
               status === "no_show_no_charge";

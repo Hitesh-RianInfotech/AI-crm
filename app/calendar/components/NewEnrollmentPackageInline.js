@@ -21,6 +21,7 @@ const BLANK_FORM = {
   label: "",
   packageID: "",
   purchaseDate: todayISO(),
+  expiryDays: "",
   services: [],
   billingType: "one_time",
   billing: {
@@ -162,6 +163,8 @@ function ServicePicker({ catalogServices, onSelect }) {
 export default function NewEnrollmentPackageInline({
   teacherOptions = [],
   packageTemplates = [],
+  /** Sell loose services with no package template — hides the package selector. */
+  serviceOnly = false,
   /** When set, only package lines whose `serviceCode` is in this set are included. */
   allowedServiceCodes,
   /** Student the package is being sold to — used to read wallet balance. */
@@ -457,7 +460,7 @@ export default function NewEnrollmentPackageInline({
   }, [form.billingType, total, firstInstallmentAmount, scheduledFlexible, firstScheduledFlexAmount]);
 
   function goToPayment() {
-    if (!form.packageID) {
+    if (!serviceOnly && !form.packageID) {
       setError("Please select a package.");
       return;
     }
@@ -555,10 +558,10 @@ export default function NewEnrollmentPackageInline({
     <div className="mt-2 h-full min-h-0 rounded-xl border border-border bg-card p-3 flex flex-col">
       <div className="shrink-0">
         <p className="text-[12px] font-semibold text-foreground">
-          New Enrollment & Package
+          {serviceOnly ? "New Enrollment & Services" : "New Enrollment & Package"}
         </p>
         <p className="text-[10px] text-muted-foreground mt-0.5">
-          Step {step} of 2 · {step === 1 ? "Package & billing" : "Payment details"}
+          Step {step} of 2 · {step === 1 ? (serviceOnly ? "Services & billing" : "Package & billing") : "Payment details"}
         </p>
       </div>
 
@@ -587,9 +590,28 @@ export default function NewEnrollmentPackageInline({
               className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
             />
 
+            {serviceOnly ? (
+              <>
+                <label className="text-[11px] font-medium text-muted-foreground">
+                  Validity (days, optional)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.expiryDays}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, expiryDays: e.target.value }))
+                  }
+                  placeholder="No expiry"
+                  className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
+                />
+              </>
+            ) : (
             <label className="text-[11px] font-medium text-muted-foreground">
               Package
             </label>
+            )}
+            {!serviceOnly && (
             <SearchableSelect
               value={form.packageID}
               onChange={(v) => handlePkgChange(v)}
@@ -599,7 +621,8 @@ export default function NewEnrollmentPackageInline({
               }))}
               placeholder="Select package…"
             />
-            {selectedPkg && (
+            )}
+            {!serviceOnly && selectedPkg && (
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
                 <p className="text-[12px] font-medium text-foreground">
                   {selectedPkg.packageName}
@@ -631,6 +654,22 @@ export default function NewEnrollmentPackageInline({
 
           {/* ── Services table ── */}
           <div className="space-y-2">
+            {serviceOnly && (
+              <SearchableSelect
+                value=""
+                onChange={(v) => {
+                  const svc = catalogServices.find((s) => String(s._id) === String(v));
+                  if (svc) addService(svc);
+                }}
+                options={catalogServices
+                  .filter(
+                    (s) =>
+                      !form.services.some((fs) => fs.serviceCode && fs.serviceCode === s.serviceCode),
+                  )
+                  .map((s) => ({ value: String(s._id), label: s.serviceName || s.serviceCode }))}
+                placeholder="Select a service to add…"
+              />
+            )}
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-[12px]">
                 <thead>
@@ -789,10 +828,12 @@ export default function NewEnrollmentPackageInline({
             </div>
 
             {/* Add service button */}
-            <ServicePicker
-              catalogServices={catalogServices}
-              onSelect={addService}
-            />
+            {!serviceOnly && (
+              <ServicePicker
+                catalogServices={catalogServices}
+                onSelect={addService}
+              />
+            )}
           </div>
 
           {/* ── Billing type ── */}
@@ -1407,7 +1448,7 @@ export default function NewEnrollmentPackageInline({
             type="button"
             className="h-8 px-3 rounded-lg bg-brand text-brand-foreground text-[11px] font-semibold disabled:opacity-60"
             onClick={goToPayment}
-            disabled={!form.packageID}
+            disabled={serviceOnly ? form.services.length === 0 : !form.packageID}
           >
             Next: Payment →
           </button>
@@ -1416,9 +1457,9 @@ export default function NewEnrollmentPackageInline({
             type="button"
             className="h-8 px-3 rounded-lg bg-brand text-brand-foreground text-[11px] font-semibold disabled:opacity-60"
             onClick={() => handleSubmit()}
-            disabled={loading || !form.packageID || walletOver || collectWalletShort || cloverNotConnected}
+            disabled={loading || (serviceOnly ? form.services.length === 0 : !form.packageID) || walletOver || collectWalletShort || cloverNotConnected}
           >
-            {loading ? "Creating…" : payWithClover ? "Pay with Clover" : "Create Enrollment & Package"}
+            {loading ? "Creating…" : payWithClover ? "Pay with Clover" : serviceOnly ? "Create Enrollment & Services" : "Create Enrollment & Package"}
           </button>
         )}
       </div>
