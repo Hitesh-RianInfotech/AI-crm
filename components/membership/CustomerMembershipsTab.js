@@ -43,6 +43,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
   const [method, setMethod] = useState('cash')
   const [shortfallMethod, setShortfallMethod] = useState('cash')
   const [walletBalance, setWalletBalance] = useState(0)
+  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [paying, setPaying] = useState(false)
   const { cloverReady } = useCloverConnection(locationID || target?.plan)
 
@@ -73,6 +74,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
     try {
       const r = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
         installmentIndex: index,
+        paymentDate: paymentDate || undefined,
         ...paymentFields,
       })
       if (r.success) {
@@ -107,6 +109,13 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
         >
           {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
         </select>
+        <label className="text-[12px] font-medium text-foreground block mb-1 mt-3">Payment date</label>
+        <input
+          type="date"
+          value={paymentDate}
+          onChange={(e) => setPaymentDate(e.target.value)}
+          className="h-9 w-full rounded-lg border border-border bg-background text-sm px-2.5 focus:outline-none focus:ring-2 focus:ring-brand/30"
+        />
         <WalletShortfallField
           className="mt-2"
           method={method}

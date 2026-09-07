@@ -1789,6 +1789,9 @@ function PayInstallmentDialog({
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [amount, setAmount] = useState("");
+  const [paymentDate, setPaymentDate] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   const { cloverReady } = useCloverConnection(locationID || plan);
@@ -1838,6 +1841,7 @@ function PayInstallmentDialog({
       {
         installmentIndex,
         amount: num,
+        paymentDate: paymentDate || undefined,
         ...walletPaymentFields({
           method,
           shortfallMethod,
@@ -1943,6 +1947,14 @@ function PayInstallmentDialog({
               </select>
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             </div>
+          </FormField>
+          <FormField label="Payment date" required>
+            <input
+              type="date"
+              value={paymentDate}
+              onChange={(e) => setPaymentDate(e.target.value)}
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[13px] outline-none focus:border-primary"
+            />
           </FormField>
           <WalletShortfallField
             method={method}
