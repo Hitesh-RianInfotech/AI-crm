@@ -193,6 +193,7 @@ export function graphToWorkflowPayload({
   edges = [],
   isActive = true,
   locationID = null,
+  isDefault = false,
 }) {
   const warnings = []
 
@@ -320,7 +321,10 @@ export function graphToWorkflowPayload({
 
   payload.status = isActive ? 'active' : 'inactive'
   payload.isFavorite = Boolean(isFavorite)
-  if (locationID) {
+  if (isDefault) {
+    payload.isDefault = true
+    // Defaults are org-wide — never send a branch locationID.
+  } else if (locationID) {
     payload.locationID = String(locationID)
   }
   if (exitLogic) {

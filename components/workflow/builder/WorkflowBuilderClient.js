@@ -51,6 +51,7 @@ export default function WorkflowBuilderClient() {
   const [loadError, setLoadError] = useState('')
   const [publishOpen, setPublishOpen] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
+  const [isDefaultTemplate, setIsDefaultTemplate] = useState(false)
 
   const [dynamicLists, setDynamicLists] = useState([])
   const { forms, reasons } = useWorkflowOptions(true)
@@ -85,6 +86,7 @@ export default function WorkflowBuilderClient() {
     if (!id) {
       const blank = createBlankWorkflow()
       setReadOnly(false)
+      setIsDefaultTemplate(false)
       loadWorkflowGraph({
         workflowId: null,
         workflowName: blank.workflowName,
@@ -99,10 +101,12 @@ export default function WorkflowBuilderClient() {
     setLoading(true)
     setLoadError('')
     setReadOnly(false)
+    setIsDefaultTemplate(false)
     api.get(`/api/workflow/${id}`).then(async (res) => {
       if (cancelled) return
       if (res?.success && res.data) {
         const data = res.data
+        setIsDefaultTemplate(Boolean(data.isDefault))
         if (data.isDefault) {
           const user = getCurrentUser()
           const ownerOrg = String(data.organisationID?._id || data.organisationID || '')
@@ -211,6 +215,9 @@ export default function WorkflowBuilderClient() {
         meta?.description != null ? String(meta.description) : state.workflowDescription || ''
       const favorite =
         meta?.isFavorite != null ? Boolean(meta.isFavorite) : Boolean(state.isFavorite)
+      const markDefault = meta
+        ? Boolean(meta.isDefault)
+        : isDefaultTemplate
       const isActive =
         meta?.status != null
           ? meta.status === 'active'
@@ -232,7 +239,8 @@ export default function WorkflowBuilderClient() {
         nodes: state.nodes,
         edges: state.edges,
         isActive,
-        locationID: getEffectiveBranch() || null,
+        locationID: markDefault ? null : getEffectiveBranch() || null,
+        isDefault: markDefault,
       })
 
       if (!ok) {
@@ -251,6 +259,7 @@ export default function WorkflowBuilderClient() {
 
       if (res?.success) {
         const saved = res.data
+        setIsDefaultTemplate(Boolean(saved?.isDefault ?? markDefault))
         const newId = saved?._id || saved?.id || existingId
         if (newId && newId !== existingId) {
           setWorkflowId(newId)
@@ -273,6 +282,7 @@ export default function WorkflowBuilderClient() {
     },
     [
       readOnly,
+      isDefaultTemplate,
       setIsActive,
       setIsFavorite,
       setSaveStatus,
@@ -305,11 +315,13 @@ export default function WorkflowBuilderClient() {
         onClose={() => !saving && setPublishOpen(false)}
         onConfirm={handlePublishConfirm}
         busy={saving}
+        allowMarkDefault={isSuperAdmin()}
         initialValues={{
           name: workflowName,
           description: workflowDescription,
           status: isActive ? 'active' : 'inactive',
           isFavorite,
+          isDefault: isDefaultTemplate,
         }}
       />
       <WorkflowStepGuide

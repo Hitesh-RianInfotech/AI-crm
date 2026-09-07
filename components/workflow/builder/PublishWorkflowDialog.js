@@ -20,11 +20,13 @@ export default function PublishWorkflowDialog({
   onConfirm,
   busy = false,
   initialValues = {},
+  allowMarkDefault = false,
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState('active')
   const [isFavorite, setIsFavorite] = useState(false)
+  const [isDefault, setIsDefault] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -32,6 +34,7 @@ export default function PublishWorkflowDialog({
     setDescription(String(initialValues.description || ''))
     setStatus(initialValues.status === 'inactive' ? 'inactive' : 'active')
     setIsFavorite(Boolean(initialValues.isFavorite))
+    setIsDefault(Boolean(initialValues.isDefault))
   }, [open, initialValues])
 
   const canSubmit = Boolean(String(name || '').trim()) && !busy
@@ -43,6 +46,7 @@ export default function PublishWorkflowDialog({
       description: String(description || '').trim(),
       status,
       isFavorite: Boolean(isFavorite),
+      isDefault: allowMarkDefault ? Boolean(isDefault) : false,
     })
   }
 
@@ -52,7 +56,8 @@ export default function PublishWorkflowDialog({
         <DialogHeader>
           <DialogTitle>Publish workflow</DialogTitle>
           <DialogDescription>
-            Confirm the details below before publishing. You can set status and mark it as a favorite.
+            Confirm the details below before publishing. You can set status
+            {allowMarkDefault ? ', mark as a default template,' : ''} and favorite.
           </DialogDescription>
         </DialogHeader>
 
@@ -138,6 +143,41 @@ export default function PublishWorkflowDialog({
               </span>
             </span>
           </label>
+
+          {allowMarkDefault ? (
+            <label
+              htmlFor="publish-wf-default"
+              className={cn(
+                'flex cursor-pointer items-center gap-3 rounded-xl border border-violet-500/30 bg-violet-500/5 px-3 py-3',
+                busy && 'cursor-not-allowed opacity-60'
+              )}
+            >
+              <input
+                id="publish-wf-default"
+                type="checkbox"
+                checked={isDefault}
+                onChange={(e) => setIsDefault(e.target.checked)}
+                disabled={busy}
+                className="h-4 w-4 rounded border-border"
+              />
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                <Star
+                  className={cn(
+                    'h-4 w-4 shrink-0',
+                    isDefault ? 'fill-violet-500 text-violet-600' : 'text-muted-foreground'
+                  )}
+                />
+                <span>
+                  <span className="block text-[13px] font-semibold text-foreground">
+                    Mark as default template
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    Shared with every location in your organisation (not tied to one branch)
+                  </span>
+                </span>
+              </span>
+            </label>
+          ) : null}
         </div>
 
         <DialogFooter className="gap-2">

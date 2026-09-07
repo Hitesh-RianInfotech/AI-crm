@@ -153,8 +153,8 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
       const marked = Boolean(res?.data?.isDefault)
       setListSuccessMsg(
         marked
-          ? 'Workflow marked as a global default template.'
-          : 'Workflow removed from global defaults.',
+          ? 'Workflow marked as a default template for every location in your organisation.'
+          : 'Workflow removed from defaults and scoped to the current branch.',
       )
     } else {
       setListError(res?.error || 'Failed to update default status.')
@@ -289,8 +289,8 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
                   <div>
                     <h3 className="text-[16px] font-semibold text-foreground">Default templates</h3>
                     <p className="text-[12px] text-muted-foreground">
-                      Shared templates — set Active / Inactive for your studio, or duplicate to
-                      customize.
+                      Org-wide templates (no branch) — set Active / Inactive, or duplicate to
+                      customize for a location.
                     </p>
                   </div>
                   <span className="text-[12px] text-muted-foreground">{defaultWorkflows.length}</span>
