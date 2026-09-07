@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import api from '@/lib/api'
-import { getEffectiveBranch, getCurrentUser } from '@/lib/auth'
-import { isSuperAdmin, hasPermission } from '@/lib/permissions'
+import { getEffectiveBranch } from '@/lib/auth'
+import { canManageDefaultWorkflows } from '@/lib/permissions'
 import { useWorkflowOptions } from '@/lib/useWorkflowOptions'
 import { extractDynamicListsList } from '@/lib/dynamic-list-normalize'
 import { hydrateContactGroupsFromAudience } from '@/lib/workflow-contact'
@@ -108,15 +108,8 @@ export default function WorkflowBuilderClient() {
         const data = res.data
         setIsDefaultTemplate(Boolean(data.isDefault))
         if (data.isDefault) {
-          const user = getCurrentUser()
-          const ownerOrg = String(data.organisationID?._id || data.organisationID || '')
-          const myOrg = String(user?.organisationID || user?.organizationID || '')
-          const canEdit =
-            isSuperAdmin() ||
-            (hasPermission('AiAndAutomation', 'workflows', 'edit') &&
-              ownerOrg &&
-              ownerOrg === myOrg)
-          setReadOnly(!canEdit)
+          // Shared default templates: require Default Workflows permission.
+          setReadOnly(!canManageDefaultWorkflows())
         } else {
           setReadOnly(false)
         }
@@ -315,7 +308,7 @@ export default function WorkflowBuilderClient() {
         onClose={() => !saving && setPublishOpen(false)}
         onConfirm={handlePublishConfirm}
         busy={saving}
-        allowMarkDefault={isSuperAdmin()}
+        allowMarkDefault={canManageDefaultWorkflows()}
         initialValues={{
           name: workflowName,
           description: workflowDescription,

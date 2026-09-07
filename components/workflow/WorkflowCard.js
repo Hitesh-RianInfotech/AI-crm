@@ -1,7 +1,10 @@
 'use client'
 
-import Link from 'next/link'
-import { Copy, Loader2, Pencil, Trash2, Workflow, Star } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Copy, Heart, Loader2, Pencil, Star, Trash2, Workflow } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import Switch from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import {
   flattenWorkflowSteps,
@@ -10,213 +13,241 @@ import {
 } from '@/lib/workflow-normalize'
 import { formatReasonLabel } from '@/lib/dynamic-list-normalize'
 
-function activationLabel(studioActivationStatus) {
-  if (studioActivationStatus === 'active') {
-    return {
-      label: 'Active',
-      className: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-    }
-  }
-  return {
-    label: 'Inactive',
-    className: 'bg-muted text-muted-foreground',
+function formatDate(value) {
+  if (!value) return '—'
+  try {
+    return new Date(value).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+  } catch {
+    return '—'
   }
 }
 
 export default function WorkflowCard({
   workflow,
   variant = 'own', // 'own' | 'default'
-  isSuperAdmin = false,
+  canManageDefaults = false,
   canEditDefault = false,
   onDelete,
   onDuplicate,
   onToggleDefault,
   onSetActivation,
+  onToggleStatus,
+  onToggleFavorite,
   duplicating = false,
   busy = false,
   detailPathBase = '/ai-automation/workflows',
 }) {
+  const router = useRouter()
   const id = workflow?._id || workflow?.id
   const flatSteps = flattenWorkflowSteps(workflow?.steps)
   const stepsCount = flatSteps.length || workflow?.stepsCount || 0
   const listID = normalizeWorkflowListIdFromApi(workflow)
   const listName = normalizeWorkflowListNameFromApi(workflow) || workflow?.listName || ''
   const triggerLabel = listID
-    ? `List: ${listName || 'Dynamic list'} · ${formatReasonLabel(workflow?.reason)}`
+    ? listName || 'Dynamic list'
     : workflow?.audienceMode
       ? `Audience: ${workflow.audienceMode}`
-      : `Event: ${workflow?.event || '—'}`
+      : workflow?.event || '—'
+  const reasonLabel =
+    listID || workflow?.event || workflow?.reason
+      ? formatReasonLabel(workflow?.reason)
+      : ''
 
   const isDefaultVariant = variant === 'default'
   const isOwnDefault = Boolean(workflow?.isDefault) && variant === 'own'
-  const activation = activationLabel(workflow?.studioActivationStatus)
   const isActivated = workflow?.studioActivationStatus === 'active'
+  const isInactive = isDefaultVariant
+    ? workflow?.studioActivationStatus !== 'active'
+    : workflow?.status === 'inactive'
+  const isFavorite = Boolean(workflow?.isFavorite)
   const disabled = duplicating || busy
+  const openHref = `${detailPathBase}/builder?id=${id}`
 
   return (
-    <article className="h-auto min-h-[220px] w-full rounded-xl border border-border bg-card p-4 shadow-sm">
-      <div className="flex h-full flex-col">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted">
-            <Workflow className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            {isOwnDefault || isDefaultVariant ? (
-              <span className="inline-flex h-6 items-center rounded-md bg-violet-500/10 px-2.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
-                Default
-              </span>
-            ) : null}
-            {isDefaultVariant ? (
-              <span
-                className={cn(
-                  'inline-flex h-6 items-center rounded-md px-2.5 text-[10px] font-medium',
-                  activation.className,
-                )}
-              >
-                {activation.label}
-              </span>
-            ) : (
-              <span className="inline-flex h-6 items-center rounded-bl-md rounded-tr-md bg-primary/10 px-2.5 text-[10px] font-medium text-primary">
-                {workflow?.status === 'inactive' ? 'Inactive' : 'Active'}
-              </span>
+    <Card
+      className={cn(
+        'relative transition-all duration-200 hover:shadow-lg',
+        isInactive && 'opacity-60',
+      )}
+    >
+      <div className="absolute right-3 top-3 flex items-center gap-1">
+        {isDefaultVariant || isOwnDefault ? (
+          <span className="mr-1 inline-flex h-6 items-center rounded-full bg-violet-500/10 px-2 text-[10px] font-semibold text-violet-700 dark:text-violet-300">
+            Default
+          </span>
+        ) : null}
+        <Switch
+          checked={!isInactive}
+          onChange={() => {
+            if (isDefaultVariant) {
+              onSetActivation?.(id, isActivated ? 'inactive' : 'active')
+            } else {
+              onToggleStatus?.(id, isInactive ? 'active' : 'inactive')
+            }
+          }}
+          disabled={disabled}
+          title={isInactive ? 'Set active' : 'Set inactive'}
+          className="scale-75 disabled:opacity-40"
+        />
+        {!isDefaultVariant ? (
+          <button
+            type="button"
+            onClick={() => onToggleFavorite?.(id)}
+            disabled={disabled}
+            title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-full transition-all duration-200 disabled:opacity-40',
+              isFavorite
+                ? 'text-red-500 hover:bg-red-50'
+                : 'text-muted-foreground hover:bg-muted hover:text-red-400',
             )}
+          >
+            <Heart className={cn('h-4 w-4', isFavorite && 'fill-current')} />
+          </button>
+        ) : null}
+      </div>
+
+      <CardHeader className="pr-24">
+        <div className="mb-2 flex items-start gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100">
+            <Workflow className="h-6 w-6 text-slate-600" />
+          </div>
+        </div>
+        <CardTitle className="line-clamp-1 text-lg">{workflow?.name || '—'}</CardTitle>
+        {workflow?.description ? (
+          <p className="line-clamp-2 text-sm text-slate-500">{workflow.description}</p>
+        ) : null}
+      </CardHeader>
+
+      <CardContent>
+        <div className="mb-4 space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Trigger</span>
+            <span className="max-w-[160px] truncate font-medium text-slate-900">{triggerLabel}</span>
+          </div>
+          {reasonLabel ? (
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Reason</span>
+              <span className="max-w-[160px] truncate font-medium text-slate-900">{reasonLabel}</span>
+            </div>
+          ) : null}
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Steps</span>
+            <span className="font-medium text-slate-900">{stepsCount}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Created</span>
+            <span className="font-medium text-slate-900">{formatDate(workflow?.createdAt)}</span>
           </div>
         </div>
 
-        <div className="mt-3">
-          <h3 className="truncate text-[18px] font-semibold leading-7 text-foreground">
-            {workflow?.name || '—'}
-          </h3>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            {triggerLabel} • {stepsCount} steps
-          </p>
-          {workflow?.description ? (
-            <p className="mt-2 line-clamp-2 text-[12px] text-muted-foreground">{workflow.description}</p>
-          ) : null}
-        </div>
-
-        <div className="mt-auto space-y-2 pt-4">
-          {isDefaultVariant ? (
-            <>
-              <div
-                className={cn(
-                  'grid gap-2',
-                  canEditDefault ? 'grid-cols-3' : 'grid-cols-2',
-                )}
+        {isDefaultVariant ? (
+          <div className="flex gap-2">
+            {canEditDefault ? (
+              <Button
+                variant="gradient"
+                size="sm"
+                className="flex-1"
+                onClick={() => router.push(openHref)}
               >
-                {canEditDefault ? (
-                  <Link
-                    href={`${detailPathBase}/builder?id=${id}`}
-                    className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-background text-[11px] font-medium text-muted-foreground hover:bg-muted/50"
-                  >
-                    <Pencil className="h-3.5 w-3.5 shrink-0" />
-                    Edit
-                  </Link>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => onDuplicate?.(id)}
-                  disabled={disabled}
-                  className={cn(
-                    'inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-background text-[11px] font-medium text-foreground hover:bg-muted/50',
-                    disabled && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  {duplicating ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                  {duplicating ? 'Copying…' : 'Duplicate'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onSetActivation?.(id, isActivated ? 'inactive' : 'active')}
-                  disabled={disabled}
-                  className={cn(
-                    'inline-flex h-9 items-center justify-center gap-1 rounded-xl text-[11px] font-medium',
-                    isActivated
-                      ? 'border border-border bg-background text-foreground hover:bg-muted/50'
-                      : 'bg-[var(--studio-primary)] text-white hover:brightness-95',
-                    disabled && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : null}
-                  {isActivated ? 'Inactive' : 'Active'}
-                </button>
-              </div>
-              {!canEditDefault ? (
-                <p className="text-[10px] leading-snug text-muted-foreground">
-                  Duplicate to customize for your studio. Only Active / Inactive can be changed here.
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <div className="grid grid-cols-3 gap-2">
-                <Link
-                  href={`${detailPathBase}/builder?id=${id}`}
-                  className="inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-background text-[11px] font-medium text-muted-foreground hover:bg-muted/50"
-                >
-                  <Pencil className="h-3.5 w-3.5 shrink-0" />
-                  Open
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => onDuplicate?.(id)}
-                  disabled={disabled}
-                  className={cn(
-                    'inline-flex h-9 items-center justify-center gap-1 rounded-xl border border-border bg-background text-[11px] font-medium text-foreground hover:bg-muted/50',
-                    disabled && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  {duplicating ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  ) : (
-                    <Copy className="h-3.5 w-3.5 shrink-0" />
-                  )}
-                  {duplicating ? 'Copying…' : 'Duplicate'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete?.(id)}
-                  disabled={disabled}
-                  className={cn(
-                    'inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-[#EF4444] text-[11px] font-medium text-white hover:bg-[#DC2626]',
-                    disabled && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                  Delete
-                </button>
-              </div>
-              {isSuperAdmin ? (
-                <button
-                  type="button"
-                  onClick={() => onToggleDefault?.(id)}
-                  disabled={disabled}
-                  className={cn(
-                    'inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-background text-[11px] font-medium hover:bg-muted/50',
-                    isOwnDefault
-                      ? 'text-violet-700 dark:text-violet-300'
-                      : 'text-foreground',
-                    disabled && 'cursor-not-allowed opacity-60',
-                  )}
-                >
-                  {busy ? (
-                    <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                  ) : (
-                    <Star
-                      className={cn('h-3.5 w-3.5 shrink-0', isOwnDefault && 'fill-current')}
-                    />
-                  )}
-                  {isOwnDefault ? 'Remove default' : 'Mark as default'}
-                </button>
-              ) : null}
-            </>
-          )}
-        </div>
-      </div>
-    </article>
+                <Pencil className="mr-1.5 h-3.5 w-3.5" />
+                Edit
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={disabled}
+              onClick={() => onDuplicate?.(id)}
+            >
+              {duplicating ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Copy className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {duplicating ? 'Cloning…' : 'Clone'}
+            </Button>
+            {canEditDefault && onDelete ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onDelete?.(id)}
+                disabled={disabled}
+                title="Delete default template"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              variant="gradient"
+              size="sm"
+              className="flex-1"
+              disabled={isInactive}
+              onClick={() => router.push(openHref)}
+            >
+              <Pencil className="mr-1.5 h-3.5 w-3.5" />
+              Open
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={disabled || isInactive}
+              onClick={() => onDuplicate?.(id)}
+            >
+              {duplicating ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Copy className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {duplicating ? 'Cloning…' : 'Clone'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onDelete?.(id)}
+              disabled={disabled}
+              title="Delete"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {canManageDefaults && !isDefaultVariant ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 w-full"
+            disabled={disabled}
+            onClick={() => onToggleDefault?.(id)}
+          >
+            {busy ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Star className={cn('mr-1.5 h-3.5 w-3.5', isOwnDefault && 'fill-current text-violet-600')} />
+            )}
+            {isOwnDefault ? 'Remove default' : 'Mark as default'}
+          </Button>
+        ) : null}
+
+        {isDefaultVariant && !canEditDefault ? (
+          <p className="mt-2 text-[11px] leading-snug text-slate-500">
+            Clone to customize for your location. Use the switch for Active / Inactive.
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   )
 }
