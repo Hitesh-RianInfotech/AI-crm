@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import api from '@/lib/api'
+import { getEffectiveBranch, getCurrentUser } from '@/lib/auth'
+import { isSuperAdmin, hasPermission } from '@/lib/permissions'
 import { useWorkflowOptions } from '@/lib/useWorkflowOptions'
 import { extractDynamicListsList } from '@/lib/dynamic-list-normalize'
 import { hydrateContactGroupsFromAudience } from '@/lib/workflow-contact'
@@ -48,6 +50,7 @@ export default function WorkflowBuilderClient() {
   const [saving, setSaving] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [publishOpen, setPublishOpen] = useState(false)
+  const [readOnly, setReadOnly] = useState(false)
 
   const [dynamicLists, setDynamicLists] = useState([])
   const { forms, reasons } = useWorkflowOptions(true)
@@ -81,6 +84,7 @@ export default function WorkflowBuilderClient() {
     const id = getIdFromUrl()
     if (!id) {
       const blank = createBlankWorkflow()
+      setReadOnly(false)
       loadWorkflowGraph({
         workflowId: null,
         workflowName: blank.workflowName,
@@ -94,10 +98,25 @@ export default function WorkflowBuilderClient() {
     let cancelled = false
     setLoading(true)
     setLoadError('')
+    setReadOnly(false)
     api.get(`/api/workflow/${id}`).then(async (res) => {
       if (cancelled) return
       if (res?.success && res.data) {
-        const graph = workflowToGraph(res.data)
+        const data = res.data
+        if (data.isDefault) {
+          const user = getCurrentUser()
+          const ownerOrg = String(data.organisationID?._id || data.organisationID || '')
+          const myOrg = String(user?.organisationID || user?.organizationID || '')
+          const canEdit =
+            isSuperAdmin() ||
+            (hasPermission('AiAndAutomation', 'workflows', 'edit') &&
+              ownerOrg &&
+              ownerOrg === myOrg)
+          setReadOnly(!canEdit)
+        } else {
+          setReadOnly(false)
+        }
+        const graph = workflowToGraph(data)
         const trigger = graph.nodes?.find((n) => n.data?.category === 'trigger')
         const listId =
           res.data?.listID?._id ||
@@ -179,6 +198,13 @@ export default function WorkflowBuilderClient() {
       setSaving(true)
       setSaveStatus('saving')
 
+      if (readOnly) {
+        setSaving(false)
+        setSaveStatus('unsaved')
+        toast.error('Default templates can’t be edited here. Duplicate it from the workflows list first.')
+        return false
+      }
+
       const state = useWorkflowBuilderStore.getState()
       const name = meta?.name != null ? String(meta.name).trim() : state.workflowName
       const description =
@@ -206,6 +232,7 @@ export default function WorkflowBuilderClient() {
         nodes: state.nodes,
         edges: state.edges,
         isActive,
+        locationID: getEffectiveBranch() || null,
       })
 
       if (!ok) {
@@ -245,6 +272,7 @@ export default function WorkflowBuilderClient() {
       return false
     },
     [
+      readOnly,
       setIsActive,
       setIsFavorite,
       setSaveStatus,
@@ -266,7 +294,12 @@ export default function WorkflowBuilderClient() {
 
   return (
     <div className="flex h-[calc(100vh-5.5rem)] min-h-[560px] flex-col overflow-hidden rounded-2xl border border-border/80 bg-card shadow-[0_8px_30px_rgba(15,23,42,0.06)] md:h-[calc(100vh-6rem)]">
-      <WorkflowBuilderHeader onSave={handleSave} onPublish={handlePublishClick} saving={saving} />
+      <WorkflowBuilderHeader
+        onSave={handleSave}
+        onPublish={handlePublishClick}
+        saving={saving}
+        readOnly={readOnly}
+      />
       <PublishWorkflowDialog
         open={publishOpen}
         onClose={() => !saving && setPublishOpen(false)}
@@ -283,6 +316,13 @@ export default function WorkflowBuilderClient() {
         activeCategory={guidedCategory}
         onSelectCategory={setGuidedCategory}
       />
+
+      {readOnly ? (
+        <div className="border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-[12px] text-violet-800 dark:text-violet-200">
+          This is a shared default template. Duplicate it from the workflows list to customize for
+          your location.
+        </div>
+      ) : null}
 
       {loadError && (
         <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-[12px] text-destructive">

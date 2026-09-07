@@ -192,6 +192,7 @@ export function graphToWorkflowPayload({
   nodes = [],
   edges = [],
   isActive = true,
+  locationID = null,
 }) {
   const warnings = []
 
@@ -319,6 +320,9 @@ export function graphToWorkflowPayload({
 
   payload.status = isActive ? 'active' : 'inactive'
   payload.isFavorite = Boolean(isFavorite)
+  if (locationID) {
+    payload.locationID = String(locationID)
+  }
   if (exitLogic) {
     payload.exitLogic = exitLogic
   } else {
