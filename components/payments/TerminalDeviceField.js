@@ -1,37 +1,49 @@
 'use client'
 
+import { useEffect, useState } from 'react'
+import api from '@/lib/api'
 import { useCloverDevices } from '@/app/settings/payments/clover/useCloverDevices'
+import { resolveLocationID } from '@/app/settings/payments/clover/useCloverConnection'
 
 /**
- * Device picker shown when `method === "terminal"`. Mirrors WalletShortfallField's
- * shape: renders nothing unless relevant, and the parent form reads `deviceID` back
- * out via `onDeviceChange` to include in the /api/payment body.
+ * Device picker shown when `method === "terminal"`. Lists Clover devices; if the
+ * location has none it falls back to registered Stripe Terminal readers. The
+ * parent reads `deviceID` back out via `onDeviceChange` (a document id in both
+ * cases — the backend resolves it and dispatches to the right processor).
  *
- * A terminal charge blocks the request until the customer completes it at the
- * device (see backend cloverDevicePayment.service.js) — there is no separate
- * "waiting" screen to poll; the submit button's own loading state covers it.
+ * A Clover charge blocks the request until it completes at the device. A Stripe
+ * reader charge returns immediately with a pending Payment and is confirmed by
+ * webhook once the customer taps their card.
  */
 export default function TerminalDeviceField({ method, locationID, deviceID, onDeviceChange, className }) {
   const { devices, loading } = useCloverDevices(locationID)
+  const resolved = resolveLocationID(locationID)
+  const [stripeReaders, setStripeReaders] = useState(null)
+
+  useEffect(() => {
+    if (method !== 'terminal' || !resolved || (devices && devices.length > 0)) { setStripeReaders(null); return }
+    let cancelled = false
+    api.get(`/api/payments/stripe/readers?locationID=${encodeURIComponent(resolved)}`).then((res) => {
+      if (!cancelled) setStripeReaders(res.success && Array.isArray(res.data) ? res.data : [])
+    })
+    return () => { cancelled = true }
+  }, [method, resolved, devices])
 
   if (method !== 'terminal') return null
 
-  if (!locationID) {
-    return (
-      <p className={className ?? 'text-[11px] text-muted-foreground'}>
-        No location on this customer — a terminal payment needs one.
-      </p>
-    )
-  }
+  const note = className ?? 'text-[11px] text-muted-foreground'
 
-  if (loading) {
-    return <p className={className ?? 'text-[11px] text-muted-foreground'}>Loading terminals…</p>
-  }
+  if (!resolved) return <p className={note}>No location on this customer — a terminal payment needs one.</p>
+  if (loading) return <p className={note}>Loading terminals…</p>
 
-  if (devices.length === 0) {
+  const options = devices.length > 0
+    ? devices.map((d) => ({ id: d._id, label: d.name || d.deviceId }))
+    : (stripeReaders || []).map((r) => ({ id: r._id, label: r.label || r.readerId }))
+
+  if (options.length === 0) {
     return (
-      <p className={className ?? 'text-[11px] text-muted-foreground'}>
-        No terminals paired for this location. Pair one in Settings → Integrations.
+      <p className={note}>
+        {stripeReaders === null ? 'Loading terminals…' : 'No terminals paired for this location. Pair one in Settings → Integrations.'}
       </p>
     )
   }
@@ -42,13 +54,9 @@ export default function TerminalDeviceField({ method, locationID, deviceID, onDe
       onChange={(e) => onDeviceChange(e.target.value)}
       className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-primary"
     >
-      <option value="" disabled>
-        Select terminal…
-      </option>
-      {devices.map((d) => (
-        <option key={d._id} value={d._id}>
-          {d.name || d.deviceId}
-        </option>
+      <option value="" disabled>Select terminal…</option>
+      {options.map((o) => (
+        <option key={o.id} value={o.id}>{o.label}</option>
       ))}
     </select>
   )

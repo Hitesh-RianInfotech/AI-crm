@@ -6,6 +6,8 @@ import MainLayout from '@/components/layout/MainLayout'
 import { useToast } from '@/components/ui/toast'
 import CloverConnectionCard from '@/app/settings/payments/clover/CloverConnectionCard'
 import CloverDeviceManager from '@/app/settings/payments/clover/CloverDeviceManager'
+import StripeConnectionCard from '@/app/settings/payments/stripe/StripeConnectionCard'
+import StripeReaderManager from '@/app/settings/payments/stripe/StripeReaderManager'
 
 function CloverCallbackStatusHandler() {
   const router = useRouter()
@@ -16,13 +18,14 @@ function CloverCallbackStatusHandler() {
     const status = searchParams.get('status')
     if (!status) return
 
+    const provider = searchParams.get('provider') === 'stripe' ? 'Stripe' : 'Clover'
     if (status === 'connected') {
-      toast.success({ title: 'Clover connected', message: 'This location is now connected to Clover.' })
+      toast.success({ title: `${provider} connected`, message: `This location is now connected to ${provider}.` })
     } else if (status === 'error') {
       const reason = searchParams.get('reason')
       toast.error({
-        title: 'Clover connection failed',
-        message: reason || 'Unable to complete the Clover connection.',
+        title: `${provider} connection failed`,
+        message: reason || `Unable to complete the ${provider} connection.`,
       })
     }
 
@@ -44,6 +47,8 @@ export default function IntegrationsPage() {
       <div className="space-y-4">
         <CloverConnectionCard />
         <CloverDeviceManager />
+        <StripeConnectionCard />
+        <StripeReaderManager />
       </div>
     </MainLayout>
   )
