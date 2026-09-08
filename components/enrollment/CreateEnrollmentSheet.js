@@ -12,6 +12,8 @@ const SHEET_WIDTH = '640px'
 export default function CreateEnrollmentSheet({
   open,
   onClose,
+  /** 'service' | 'package' | 'membership' — which tab to open on. */
+  initialMode = 'service',
   /** When set, student is fixed and the selector is hidden. */
   customerID: fixedCustomerID = null,
   customerName = '',
@@ -23,7 +25,11 @@ export default function CreateEnrollmentSheet({
 }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [mode, setMode] = useState('service')
+  const [mode, setMode] = useState(initialMode)
+
+  useEffect(() => {
+    if (open) setMode(initialMode)
+  }, [open, initialMode])
   const [selectedCustomerID, setSelectedCustomerID] = useState('')
   const [teacherOptions, setTeacherOptions] = useState([])
   const [customerOptions, setCustomerOptions] = useState([])
