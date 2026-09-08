@@ -13,6 +13,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { isSuperAdmin } from '@/lib/permissions'
+
+function normalizeScope(value) {
+  if (value === 'organization_default' || value === 'global') return value
+  return null
+}
 
 export default function PublishWorkflowDialog({
   open,
@@ -22,11 +28,12 @@ export default function PublishWorkflowDialog({
   initialValues = {},
   allowMarkDefault = false,
 }) {
+  const superAdmin = isSuperAdmin()
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState('active')
   const [isFavorite, setIsFavorite] = useState(false)
-  const [isDefault, setIsDefault] = useState(false)
+  const [workflowScope, setWorkflowScope] = useState(null)
 
   useEffect(() => {
     if (!open) return
@@ -34,19 +41,21 @@ export default function PublishWorkflowDialog({
     setDescription(String(initialValues.description || ''))
     setStatus(initialValues.status === 'inactive' ? 'inactive' : 'active')
     setIsFavorite(Boolean(initialValues.isFavorite))
-    setIsDefault(Boolean(initialValues.isDefault))
-  }, [open, initialValues])
+    setWorkflowScope(allowMarkDefault ? normalizeScope(initialValues.workflowScope) : null)
+  }, [open, initialValues, allowMarkDefault])
 
   const canSubmit = Boolean(String(name || '').trim()) && !busy
 
   const handleConfirm = () => {
     if (!canSubmit) return
+    const scope = allowMarkDefault ? normalizeScope(workflowScope) : null
+    if (scope === 'global' && !superAdmin) return
     onConfirm?.({
       name: String(name).trim(),
       description: String(description || '').trim(),
       status,
       isFavorite: Boolean(isFavorite),
-      isDefault: allowMarkDefault ? Boolean(isDefault) : false,
+      workflowScope: scope,
     })
   }
 
@@ -57,7 +66,7 @@ export default function PublishWorkflowDialog({
           <DialogTitle>Publish workflow</DialogTitle>
           <DialogDescription>
             Confirm the details below before publishing. You can set status
-            {allowMarkDefault ? ', mark as a default template,' : ''} and favorite.
+            {allowMarkDefault ? ', choose a share scope,' : ''} and favorite.
           </DialogDescription>
         </DialogHeader>
 
@@ -111,11 +120,43 @@ export default function PublishWorkflowDialog({
             </select>
           </div>
 
+          {allowMarkDefault ? (
+            <div className="space-y-1.5">
+              <label
+                className="text-[12px] font-semibold text-foreground"
+                htmlFor="publish-wf-scope"
+              >
+                Scope
+              </label>
+              <select
+                id="publish-wf-scope"
+                value={workflowScope ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setWorkflowScope(v === '' ? null : v)
+                }}
+                disabled={busy}
+                className="h-11 w-full rounded-lg border border-border bg-background px-3 text-[14px] text-foreground outline-none focus:border-[var(--studio-primary)] disabled:opacity-60"
+              >
+                <option value="">Regular (this branch)</option>
+                <option value="organization_default">Organisation default</option>
+                {superAdmin ? <option value="global">Global template</option> : null}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                {workflowScope === 'global'
+                  ? 'Shared across all studios. Studios opt in via activation.'
+                  : workflowScope === 'organization_default'
+                    ? 'Visible at every branch in your organisation.'
+                    : 'Kept on the current branch.'}
+              </p>
+            </div>
+          ) : null}
+
           <label
             htmlFor="publish-wf-favorite"
             className={cn(
               'flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-muted/20 px-3 py-3',
-              busy && 'cursor-not-allowed opacity-60'
+              busy && 'cursor-not-allowed opacity-60',
             )}
           >
             <input
@@ -130,7 +171,7 @@ export default function PublishWorkflowDialog({
               <Star
                 className={cn(
                   'h-4 w-4 shrink-0',
-                  isFavorite ? 'fill-amber-400 text-amber-500' : 'text-muted-foreground'
+                  isFavorite ? 'fill-amber-400 text-amber-500' : 'text-muted-foreground',
                 )}
               />
               <span>
@@ -143,41 +184,6 @@ export default function PublishWorkflowDialog({
               </span>
             </span>
           </label>
-
-          {allowMarkDefault ? (
-            <label
-              htmlFor="publish-wf-default"
-              className={cn(
-                'flex cursor-pointer items-center gap-3 rounded-xl border border-violet-500/30 bg-violet-500/5 px-3 py-3',
-                busy && 'cursor-not-allowed opacity-60'
-              )}
-            >
-              <input
-                id="publish-wf-default"
-                type="checkbox"
-                checked={isDefault}
-                onChange={(e) => setIsDefault(e.target.checked)}
-                disabled={busy}
-                className="h-4 w-4 rounded border-border"
-              />
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                <Star
-                  className={cn(
-                    'h-4 w-4 shrink-0',
-                    isDefault ? 'fill-violet-500 text-violet-600' : 'text-muted-foreground'
-                  )}
-                />
-                <span>
-                  <span className="block text-[13px] font-semibold text-foreground">
-                    Mark as default template
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    Shared with every location in your organisation (not tied to one branch)
-                  </span>
-                </span>
-              </span>
-            </label>
-          ) : null}
         </div>
 
         <DialogFooter className="gap-2">

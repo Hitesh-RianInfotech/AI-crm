@@ -4,7 +4,7 @@ import { Plus, Workflow } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import api from '@/lib/api'
-import { canManageDefaultWorkflows } from '@/lib/permissions'
+import { canManageDefaultWorkflows, isSuperAdmin } from '@/lib/permissions'
 import { getEffectiveBranch } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -12,19 +12,26 @@ import SearchInput from '@/components/ui/search-input'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import WorkflowCard from '@/components/workflow/WorkflowCard'
 import ConfirmDeleteWorkflowDialog from '@/components/workflow/ConfirmDeleteWorkflowDialog'
+import SetWorkflowScopeDialog from '@/components/workflow/SetWorkflowScopeDialog'
 import { buildDuplicateWorkflowPayload } from '@/lib/workflow-normalize'
 
 function parseWorkflowListResponse(data) {
   if (Array.isArray(data)) {
-    return { ownWorkflows: data, defaultWorkflows: [] }
+    return { ownWorkflows: data, orgDefaultWorkflows: [], globalWorkflows: [] }
   }
   const ownWorkflows = Array.isArray(data?.ownWorkflows)
     ? data.ownWorkflows
     : Array.isArray(data?.workflows)
       ? data.workflows
       : []
-  const defaultWorkflows = Array.isArray(data?.defaultWorkflows) ? data.defaultWorkflows : []
-  return { ownWorkflows, defaultWorkflows }
+  // New API buckets; fall back to legacy defaultWorkflows → org defaults.
+  const orgDefaultWorkflows = Array.isArray(data?.orgDefaultWorkflows)
+    ? data.orgDefaultWorkflows
+    : Array.isArray(data?.defaultWorkflows)
+      ? data.defaultWorkflows
+      : []
+  const globalWorkflows = Array.isArray(data?.globalWorkflows) ? data.globalWorkflows : []
+  return { ownWorkflows, orgDefaultWorkflows, globalWorkflows }
 }
 
 function matchesSearch(workflow, query) {
@@ -36,6 +43,7 @@ function matchesSearch(workflow, query) {
     workflow?.event,
     workflow?.reason,
     workflow?.audienceMode,
+    workflow?.workflowScope,
   ]
     .filter(Boolean)
     .join(' ')
@@ -43,13 +51,23 @@ function matchesSearch(workflow, query) {
   return hay.includes(query)
 }
 
+function findWorkflow(id, ...lists) {
+  for (const list of lists) {
+    const found = list.find((w) => (w?._id || w?.id) === id)
+    if (found) return found
+  }
+  return null
+}
+
 export default function WorkflowManagerClient({ detailPathBase = '/ai-automation/workflows' }) {
   const router = useRouter()
   const builderHref = `${detailPathBase}/builder`
   const manageDefaults = canManageDefaultWorkflows()
+  const superAdmin = isSuperAdmin()
 
   const [ownWorkflows, setOwnWorkflows] = useState([])
-  const [defaultWorkflows, setDefaultWorkflows] = useState([])
+  const [orgDefaultWorkflows, setOrgDefaultWorkflows] = useState([])
+  const [globalWorkflows, setGlobalWorkflows] = useState([])
   const [loadingList, setLoadingList] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [listError, setListError] = useState('')
@@ -62,6 +80,11 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
   const [duplicatingId, setDuplicatingId] = useState(null)
   const [actionId, setActionId] = useState(null)
 
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
+  const [scopeTarget, setScopeTarget] = useState(null)
+  const [scopeMode, setScopeMode] = useState('promote')
+  const [scopeBusy, setScopeBusy] = useState(false)
+
   const loadWorkflows = async () => {
     setLoadingList(true)
     setLoadError('')
@@ -70,7 +93,8 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
     if (res?.success) {
       const parsed = parseWorkflowListResponse(res.data)
       setOwnWorkflows(parsed.ownWorkflows)
-      setDefaultWorkflows(parsed.defaultWorkflows)
+      setOrgDefaultWorkflows(parsed.orgDefaultWorkflows)
+      setGlobalWorkflows(parsed.globalWorkflows)
     } else {
       setLoadError(res?.error || 'Failed to load workflows.')
     }
@@ -97,22 +121,29 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
     () => ownWorkflows.filter((wf) => matchesSearch(wf, q)),
     [ownWorkflows, q],
   )
-  const filteredDefaults = useMemo(
-    () => defaultWorkflows.filter((wf) => matchesSearch(wf, q)),
-    [defaultWorkflows, q],
+  const filteredOrgDefaults = useMemo(
+    () => orgDefaultWorkflows.filter((wf) => matchesSearch(wf, q)),
+    [orgDefaultWorkflows, q],
+  )
+  const filteredGlobal = useMemo(
+    () => globalWorkflows.filter((wf) => matchesSearch(wf, q)),
+    [globalWorkflows, q],
   )
 
-  const empty = !loadingList && ownWorkflows.length === 0 && defaultWorkflows.length === 0
+  const empty =
+    !loadingList &&
+    ownWorkflows.length === 0 &&
+    orgDefaultWorkflows.length === 0 &&
+    globalWorkflows.length === 0
   const searchEmpty =
     !loadingList &&
     !empty &&
     filteredOwn.length === 0 &&
-    filteredDefaults.length === 0
+    filteredOrgDefaults.length === 0 &&
+    filteredGlobal.length === 0
 
   const requestDelete = (id) => {
-    const wf =
-      ownWorkflows.find((w) => (w?._id || w?.id) === id) ||
-      defaultWorkflows.find((w) => (w?._id || w?.id) === id)
+    const wf = findWorkflow(id, ownWorkflows, orgDefaultWorkflows, globalWorkflows)
     setDeleteTarget({ id, name: wf?.name || '' })
     setDeleteDialogOpen(true)
   }
@@ -169,24 +200,39 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
     setDuplicatingId(null)
   }
 
-  const toggleDefault = async (id) => {
-    if (!id || actionId) return
-    setActionId(id)
+  const openScopeDialog = (id, currentScope, mode = 'promote') => {
+    const wf = findWorkflow(id, ownWorkflows, orgDefaultWorkflows, globalWorkflows)
+    setScopeTarget({
+      id,
+      name: wf?.name || '',
+      currentScope: currentScope ?? wf?.workflowScope ?? null,
+    })
+    setScopeMode(mode)
+    setScopeDialogOpen(true)
+  }
+
+  const confirmScope = async (workflowScope) => {
+    const id = scopeTarget?.id
+    if (!id || scopeBusy) return
+    setScopeBusy(true)
     setListError('')
     setListSuccessMsg('')
-    const res = await api.patch(`/api/workflow/${id}/default`)
+    const res = await api.patch(`/api/workflow/${id}/scope`, { workflowScope })
     if (res?.success) {
+      setScopeDialogOpen(false)
+      setScopeTarget(null)
       await loadWorkflows()
-      const marked = Boolean(res?.data?.isDefault)
-      setListSuccessMsg(
-        marked
-          ? 'Workflow marked as a default template for every location in your organisation.'
-          : 'Workflow removed from defaults and scoped to the current branch.',
-      )
+      const label =
+        workflowScope === 'global'
+          ? 'Global template'
+          : workflowScope === 'organization_default'
+            ? 'Organisation default'
+            : 'regular workflow'
+      setListSuccessMsg(`Scope updated to ${label}.`)
     } else {
-      setListError(res?.error || 'Failed to update default status.')
+      setListError(res?.error || 'Failed to update workflow scope.')
     }
-    setActionId(null)
+    setScopeBusy(false)
   }
 
   const setActivation = async (id, status) => {
@@ -194,35 +240,45 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
     setActionId(id)
     setListError('')
     setListSuccessMsg('')
+    const prev = globalWorkflows.find((w) => (w?._id || w?.id) === id)?.studioActivationStatus
+    setGlobalWorkflows((list) =>
+      list.map((w) =>
+        (w?._id || w?.id) === id ? { ...w, studioActivationStatus: status } : w,
+      ),
+    )
     const res = await api.patch(`/api/workflow/${id}/activation`, { status })
     if (res?.success) {
-      setDefaultWorkflows((prev) =>
-        prev.map((w) =>
-          (w?._id || w?.id) === id ? { ...w, studioActivationStatus: status } : w,
-        ),
-      )
       setListSuccessMsg(
         status === 'active'
-          ? 'Default template set to Active for your studio.'
-          : 'Default template set to Inactive for your studio.',
+          ? 'Global template enabled for your studio.'
+          : 'Global template disabled for your studio.',
       )
     } else {
+      setGlobalWorkflows((list) =>
+        list.map((w) =>
+          (w?._id || w?.id) === id ? { ...w, studioActivationStatus: prev } : w,
+        ),
+      )
       setListError(res?.error || 'Failed to update workflow activation.')
     }
     setActionId(null)
   }
 
-  const toggleStatus = async (id, status) => {
+  const toggleStatus = async (id, status, listKey = 'own') => {
     if (!id || actionId) return
     setActionId(id)
     setListError('')
-    const prev = ownWorkflows.find((w) => (w?._id || w?.id) === id)?.status
-    setOwnWorkflows((list) =>
+
+    const setter = listKey === 'org' ? setOrgDefaultWorkflows : setOwnWorkflows
+    const source = listKey === 'org' ? orgDefaultWorkflows : ownWorkflows
+    const prev = source.find((w) => (w?._id || w?.id) === id)?.status
+
+    setter((list) =>
       list.map((w) => ((w?._id || w?.id) === id ? { ...w, status } : w)),
     )
     const res = await api.patch(`/api/workflow/${id}`, { status })
     if (!res?.success) {
-      setOwnWorkflows((list) =>
+      setter((list) =>
         list.map((w) => ((w?._id || w?.id) === id ? { ...w, status: prev } : w)),
       )
       setListError(res?.error || 'Failed to update workflow status.')
@@ -249,6 +305,49 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
     }
     setActionId(null)
   }
+
+  const renderSection = ({ title, subtitle, items, variant, emptyLabel, onToggleStatus }) => (
+    <section className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        <p className="text-sm text-slate-500">{subtitle}</p>
+      </div>
+      {items.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            {emptyLabel}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {items.map((wf) => (
+            <WorkflowCard
+              key={wf?._id || wf?.id}
+              workflow={wf}
+              variant={variant}
+              canManageDefaults={manageDefaults}
+              isSuperAdmin={superAdmin}
+              onDelete={
+                variant === 'own' ||
+                (variant === 'org_default' && manageDefaults) ||
+                (variant === 'global' && superAdmin)
+                  ? requestDelete
+                  : undefined
+              }
+              onDuplicate={duplicateWorkflow}
+              onChangeScope={openScopeDialog}
+              onSetActivation={setActivation}
+              onToggleStatus={onToggleStatus}
+              onToggleFavorite={toggleFavorite}
+              duplicating={duplicatingId === (wf?._id || wf?.id)}
+              busy={actionId === (wf?._id || wf?.id)}
+              detailPathBase={detailPathBase}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
 
   return (
     <div className="flex min-h-full flex-col space-y-6">
@@ -306,7 +405,7 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
             </div>
             <p className="font-medium text-muted-foreground">No workflows yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Create a blank automation or activate a default template to get started.
+              Create a blank automation or enable a template to get started.
             </p>
             <div className="mt-4 flex justify-center">
               <Button variant="gradient" onClick={() => router.push(builderHref)}>
@@ -329,75 +428,33 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
 
       {!loadingList && !loadError && !empty && !searchEmpty ? (
         <div className="space-y-8">
-          <section className="space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-slate-900">Your workflows</h3>
-              <p className="text-sm text-slate-500">
-                Owned by your studio
-                {manageDefaults ? ' — mark one as a global default to share it' : ''}.
-              </p>
-            </div>
-            {filteredOwn.length === 0 ? (
-              <Card className="border-dashed">
-                <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                  No studio workflows yet.
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {filteredOwn.map((wf) => (
-                  <WorkflowCard
-                    key={wf?._id || wf?.id}
-                    workflow={wf}
-                    variant="own"
-                    canManageDefaults={manageDefaults}
-                    onDelete={requestDelete}
-                    onDuplicate={duplicateWorkflow}
-                    onToggleDefault={toggleDefault}
-                    onToggleStatus={toggleStatus}
-                    onToggleFavorite={toggleFavorite}
-                    duplicating={duplicatingId === (wf?._id || wf?.id)}
-                    busy={actionId === (wf?._id || wf?.id)}
-                    detailPathBase={detailPathBase}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-slate-900">Default templates</h3>
-              <p className="text-sm text-slate-500">
-                Org-wide templates — set Active / Inactive, or clone to customize for a location.
-              </p>
-            </div>
-            {filteredDefaults.length === 0 ? (
-              <Card className="border-dashed">
-                <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                  No default templates available yet.
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                {filteredDefaults.map((wf) => (
-                  <WorkflowCard
-                    key={wf?._id || wf?.id}
-                    workflow={wf}
-                    variant="default"
-                    canManageDefaults={manageDefaults}
-                    canEditDefault={manageDefaults}
-                    onDelete={manageDefaults ? requestDelete : undefined}
-                    onDuplicate={duplicateWorkflow}
-                    onSetActivation={setActivation}
-                    duplicating={duplicatingId === (wf?._id || wf?.id)}
-                    busy={actionId === (wf?._id || wf?.id)}
-                    detailPathBase={detailPathBase}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
+          {renderSection({
+            title: 'Your workflows',
+            subtitle: manageDefaults
+              ? 'Owned by this branch — mark one as an org or global default to share it.'
+              : 'Owned by this branch.',
+            items: filteredOwn,
+            variant: 'own',
+            emptyLabel: 'No studio workflows yet.',
+            onToggleStatus: (id, status) => toggleStatus(id, status, 'own'),
+          })}
+          {renderSection({
+            title: 'Organisation defaults',
+            subtitle:
+              'Org-wide templates (all branches). Status is shared — managed with Default Workflows permission.',
+            items: filteredOrgDefaults,
+            variant: 'org_default',
+            emptyLabel: 'No organisation default templates yet.',
+            onToggleStatus: (id, status) => toggleStatus(id, status, 'org'),
+          })}
+          {renderSection({
+            title: 'Global templates',
+            subtitle: 'Shared across all studios — opt your studio in or out with the switch.',
+            items: filteredGlobal,
+            variant: 'global',
+            emptyLabel: 'No global templates available yet.',
+            onToggleStatus: undefined,
+          })}
         </div>
       ) : null}
 
@@ -411,6 +468,20 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
           setDeleteTarget(null)
         }}
         onConfirm={confirmDelete}
+      />
+
+      <SetWorkflowScopeDialog
+        open={scopeDialogOpen}
+        busy={scopeBusy}
+        workflowName={scopeTarget?.name}
+        currentScope={scopeTarget?.currentScope}
+        mode={scopeMode}
+        onClose={() => {
+          if (scopeBusy) return
+          setScopeDialogOpen(false)
+          setScopeTarget(null)
+        }}
+        onConfirm={confirmScope}
       />
     </div>
   )
