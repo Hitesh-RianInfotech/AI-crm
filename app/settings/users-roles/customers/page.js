@@ -837,7 +837,7 @@ export default function CustomersPage() {
             onRemoveChip={(chip) => {
               clearSelection()
               const next = removeCustomerFilterChip(
-                { ...filters, teacherID: teacherFilter },
+                { ...filters, teacherID: teacherFilter, search: debouncedSearch },
                 chip,
                 {
                   clearSearch: () => {
@@ -847,10 +847,15 @@ export default function CustomersPage() {
                 },
               )
               setTeacherFilter(next.teacherID || '')
+              if (chip?.remove?.type === 'search') {
+                setSearch('')
+                setDebouncedSearch('')
+              }
               setFilters(
                 sanitizeCustomerFilters({
                   ...next,
                   teacherID: '',
+                  // Keep search in local state; filters.search is not the source of truth
                   search: '',
                 }),
               )
