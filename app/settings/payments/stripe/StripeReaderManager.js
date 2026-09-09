@@ -11,8 +11,9 @@ import LocationSelector from '@/components/shared/LocationSelector'
 import { useStripeConnection } from './useStripeConnection'
 import { resolveLocationID } from '@/app/settings/payments/clover/useCloverConnection'
 
-export default function StripeReaderManager() {
-  const [locationID, setLocationID] = useState(null)
+export default function StripeReaderManager({ locationID: fixedLocationID = null }) {
+  const [ownLocationID, setOwnLocationID] = useState(null)
+  const locationID = fixedLocationID ?? ownLocationID
   const resolved = resolveLocationID(locationID)
   const { status } = useStripeConnection(locationID)
   const [readers, setReaders] = useState([])
@@ -66,10 +67,12 @@ export default function StripeReaderManager() {
         </p>
       </div>
 
-      <div className="mt-4 max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
-        <LocationSelector value={locationID} onChange={setLocationID} multiple={false} showAllOption={false} placeholder="Select location to configure…" />
-      </div>
+      {!fixedLocationID && (
+        <div className="mt-4 max-w-sm">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
+          <LocationSelector value={locationID} onChange={setOwnLocationID} multiple={false} showAllOption={false} placeholder="Select location to configure…" />
+        </div>
+      )}
 
       {!resolved && <p className="mt-4 text-sm text-muted-foreground">Select a location to manage its readers.</p>}
       {resolved && !connected && <p className="mt-4 text-sm text-muted-foreground">Connect Stripe for this location first.</p>}

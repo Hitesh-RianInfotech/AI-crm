@@ -540,6 +540,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
   const [products, setProducts] = useState([])
   const [eventTypes, setEventTypes] = useState([])
   const [templates, setTemplates] = useState([])
+  const [teachers, setTeachers] = useState([])
 
   const [customerQuery, setCustomerQuery] = useState('')
   const [customers, setCustomers] = useState([])
@@ -562,6 +563,10 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
   const [useWallet, setUseWallet] = useState(false)
   const [walletAmount, setWalletAmount] = useState('')
   const [walletBalance, setWalletBalance] = useState(null)
+  // tip
+  const [tipEnabled, setTipEnabled] = useState(false)
+  const [tipTeacherID, setTipTeacherID] = useState('')
+  const [tipAmount, setTipAmount] = useState('')
   // payment_plan
   const [planCount, setPlanCount] = useState('3')
   const [planFreq, setPlanFreq] = useState('monthly')
@@ -577,6 +582,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
     setName(''); setItems([]); setSaveAsTemplate(false)
     setBillingType('one_time'); setCollectNow(true); setPayMethod('cash'); setCollectDate(todayISO())
     setUseWallet(false); setWalletAmount(''); setWalletBalance(null)
+    setTipEnabled(false); setTipTeacherID(''); setTipAmount('')
     setPlanCount('3'); setPlanFreq('monthly'); setPlanStart(todayISO())
     setFlexMode('single'); setFlexDueDate(todayISO()); setFlexRows([{ dueDate: todayISO(), amount: '' }])
     setCustomers([])
@@ -585,11 +591,13 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
       api.get('/api/event-type?limit=200&isActive=true'),
       api.get('/api/purchase-template?limit=200&isActive=true'),
       api.get('/api/customer?limit=500'),
-    ]).then(([p, e, t, c]) => {
+      api.get('/api/teacher?limit=200&status=active'),
+    ]).then(([p, e, t, c, tch]) => {
       if (p.success) setProducts(Array.isArray(p.data) ? p.data : [])
       if (e.success) setEventTypes(Array.isArray(e.data) ? e.data : [])
       if (t.success) setTemplates(Array.isArray(t.data) ? t.data : [])
       if (c.success) setCustomers(Array.isArray(c.data) ? c.data : [])
+      if (tch.success) setTeachers(Array.isArray(tch.data) ? tch.data : [])
     })
   }, [open])
 
@@ -664,10 +672,14 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
         toast.success('Event & purchase created')
       } else if (billingType === 'one_time') {
         if (collectNow && !walletOver) {
+          const tip = tipEnabled && tipTeacherID && Number(tipAmount) > 0
+            ? { teacherID: tipTeacherID, amount: Number(tipAmount), method: payMethod === 'card' ? 'card' : payMethod }
+            : undefined
           const payRes = await api.post('/api/payment', {
             customerID: customer._id, purchaseID: purchase._id, type: 'event_purchase',
             amount: payable, method: payMethod, paymentDate: collectDate || undefined,
             walletAmount: walletApplied > 0 ? walletApplied : undefined, notes: name.trim(),
+            tip,
           })
           if (!payRes.success) toast.error('Purchase saved, but payment failed', { description: payRes.error })
           else if (payRes.data?.checkoutUrl) { window.open(payRes.data.checkoutUrl, '_blank', 'noopener'); toast.success('Card checkout opened in a new tab') }
@@ -832,7 +844,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
                   <Label>Payment method</Label>
                   <select className={selectCls} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
                     <option value="cash">Cash</option>
-                    <option value="card">Card — Clover checkout</option>
+                    <option value="card">Card</option>
                     <option value="cheque">Cheque</option>
                     <option value="other">Bank transfer / other</option>
                   </select>
@@ -868,9 +880,28 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
                           </>
                         )}
                       </div>
+                      <div className="rounded-xl border border-border p-4 flex flex-col gap-3">
+                        <label className="flex items-center gap-2 text-sm font-medium">
+                          <input type="checkbox" checked={tipEnabled} onChange={(e) => setTipEnabled(e.target.checked)} />
+                          Add a tip for a teacher
+                        </label>
+                        {tipEnabled && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <select className={selectCls} value={tipTeacherID} onChange={(e) => setTipTeacherID(e.target.value)}>
+                              <option value="">Select teacher…</option>
+                              {teachers.map((t) => <option key={t._id} value={t._id}>{t.name || t.email}</option>)}
+                            </select>
+                            <Input type="number" min="0" step="0.01" placeholder="Tip amount" value={tipAmount} onChange={(e) => setTipAmount(e.target.value)} />
+                          </div>
+                        )}
+                      </div>
+
                       <div className="rounded-xl border border-border bg-muted/30 text-sm divide-y divide-border">
                         {walletApplied > 0 && <div className="flex justify-between px-4 py-2.5"><span className="text-muted-foreground">From wallet</span><span className="tabular-nums">{money(walletApplied)}</span></div>}
-                        <div className="flex justify-between px-4 py-2.5"><span className="text-muted-foreground">{payMethod === 'card' ? 'On card (Clover)' : `By ${payMethod}`}</span><span className="tabular-nums">{money(methodCharge)}</span></div>
+                        <div className="flex justify-between px-4 py-2.5"><span className="text-muted-foreground">{payMethod === 'card' ? 'On card' : `By ${payMethod}`}</span><span className="tabular-nums">{money(methodCharge)}</span></div>
+                        {tipEnabled && Number(tipAmount) > 0 && (
+                          <div className="flex justify-between px-4 py-2.5"><span className="text-muted-foreground">Teacher tip (recorded separately)</span><span className="tabular-nums">{money(Number(tipAmount))}</span></div>
+                        )}
                         <div className="flex justify-between px-4 py-3 font-semibold"><span>Total collected</span><span className="tabular-nums">{money(payable)}</span></div>
                       </div>
                     </>

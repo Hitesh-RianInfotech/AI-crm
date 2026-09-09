@@ -9,8 +9,9 @@ import LocationSelector from '@/components/shared/LocationSelector'
 import { useStripeConnection } from './useStripeConnection'
 import { useCloverConnection } from '@/app/settings/payments/clover/useCloverConnection'
 
-export default function StripeConnectionCard() {
-  const [locationID, setLocationID] = useState(null)
+export default function StripeConnectionCard({ locationID: fixedLocationID = null }) {
+  const [ownLocationID, setOwnLocationID] = useState(null)
+  const locationID = fixedLocationID ?? ownLocationID
   const {
     status, configured, accountName, accountId, chargesEnabled, detailsSubmitted,
     connectedAt, webhookLastReceivedAt, paymentProvider, lastError,
@@ -71,10 +72,12 @@ export default function StripeConnectionCard() {
         </p>
       )}
 
-      <div className="mt-4 max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
-        <LocationSelector value={locationID} onChange={setLocationID} multiple={false} showAllOption={false} placeholder="Select location to configure…" />
-      </div>
+      {!fixedLocationID && (
+        <div className="mt-4 max-w-sm">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
+          <LocationSelector value={locationID} onChange={setOwnLocationID} multiple={false} showAllOption={false} placeholder="Select location to configure…" />
+        </div>
+      )}
 
       {!locationID && <p className="mt-4 text-sm text-muted-foreground">Select a location to view or manage its Stripe connection.</p>}
 

@@ -52,10 +52,8 @@ import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import LocationSelector from "@/components/shared/LocationSelector";
 import SendPaymentLinkMenu from "@/components/payments/SendPaymentLinkMenu";
 import api from "@/lib/api";
-import {
-  useCloverConnection,
-  resolveLocationID,
-} from "@/app/settings/payments/clover/useCloverConnection";
+import { resolveLocationID } from "@/app/settings/payments/clover/useCloverConnection";
+import { useCardProcessor } from "@/app/settings/payments/useCardProcessor";
 import {
   openCheckoutTab,
   navigateCheckoutTab,
@@ -1435,7 +1433,7 @@ function PaymentSchedule({
   onSent,
 }) {
   const [open, setOpen] = useState(false);
-  const { cloverReady } = useCloverConnection(locationID || plan);
+  const { ready: cloverReady } = useCardProcessor(locationID || plan);
 
   if (!plan) return null;
 
@@ -1795,7 +1793,7 @@ function PayInstallmentDialog({
   );
   const [saving, setSaving] = useState(false);
   const toast = useToast();
-  const { cloverReady } = useCloverConnection(locationID || plan);
+  const { ready: cloverReady } = useCardProcessor(locationID || plan);
 
   useEffect(() => {
     if (open && plan?.customerID) {
@@ -1966,7 +1964,7 @@ function PayInstallmentDialog({
           />
           {cloverNotConnected && (
             <p className="text-[12px] text-muted-foreground">
-              Finish Clover setup in Settings → Integrations to charge a card.
+              Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.
             </p>
           )}
           <div className="flex justify-end gap-2 pt-1">
@@ -1993,7 +1991,7 @@ function PayInstallmentDialog({
               {saving
                 ? "Recording…"
                 : payWithClover
-                  ? "Pay with Clover"
+                  ? "Pay by card"
                   : `Pay $${(Number(amount) || 0).toFixed(2)}`}
             </Button>
           </div>
@@ -2374,7 +2372,7 @@ function PackagesTab({ customerID, locationID }) {
   const [payInstallTarget, setPayInstallTarget] = useState(null); // { plan, index }
   const [changeInstallDateTarget, setChangeInstallDateTarget] = useState(null); // { plan, index }
   const toast = useToast();
-  const { cloverReady } = useCloverConnection(locationID);
+  const { ready: cloverReady } = useCardProcessor(locationID);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -3575,8 +3573,7 @@ function PackagesTab({ customerID, locationID }) {
                   </FormField>
                   {cloverNotConnected && (
                     <p className="text-[12px] text-muted-foreground">
-                      Finish Clover setup in Settings → Integrations to charge a
-                      card.
+                      Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.
                     </p>
                   )}
                 </div>
@@ -3702,7 +3699,7 @@ function PackagesTab({ customerID, locationID }) {
                   {adding
                     ? "Adding…"
                     : payWithClover
-                      ? "Pay with Clover"
+                      ? "Pay by card"
                       : "Add Package"}
                 </Button>
               </div>
@@ -3747,7 +3744,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
   const [addForm, setAddForm] = useState(BLANK_ENR_FORM);
   const [selectedPkg, setSelectedPkg] = useState(null);
   const [adding, setAdding] = useState(false);
-  const { cloverReady } = useCloverConnection(locationID);
+  const { ready: cloverReady } = useCardProcessor(locationID);
 
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelling, setCancelling] = useState(false);
@@ -5454,8 +5451,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                           </FormField>
                           {cloverNotConnected && (
                             <p className="text-[12px] text-muted-foreground">
-                              Finish Clover setup in Settings → Integrations to
-                              charge a card.
+                              Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.
                             </p>
                           )}
                         </div>
@@ -5805,7 +5801,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                   {adding
                     ? "Adding…"
                     : payWithClover
-                      ? "Pay with Clover"
+                      ? "Pay by card"
                       : "Add Package"}
                 </Button>
               </div>
@@ -5834,12 +5830,13 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [deviceID, setDeviceID] = useState("");
+  const [tipConfig, setTipConfig] = useState({ promptTip: false });
   const [newDueDate, setNewDueDate] = useState(
     cp.dueDate ? new Date(cp.dueDate).toISOString().slice(0, 10) : "",
   );
   const [saving, setSaving] = useState(false);
   const toast = useToast();
-  const { cloverReady } = useCloverConnection(locationID);
+  const { ready: cloverReady } = useCardProcessor(locationID);
 
   useEffect(() => {
     if (mode === "pay") fetchWalletBalance(customerID).then(setWalletBalance);
@@ -5876,7 +5873,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
         balance: walletBalance,
         amountDue: num,
       }),
-      ...(payWithTerminal ? { deviceID } : {}),
+      ...(payWithTerminal ? { deviceID, ...tipConfig } : {}),
       ...(paymentDate ? { paymentDate } : {}),
     });
     if (res.success) {
@@ -6052,7 +6049,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
             />
             {cloverNotConnected && (
               <p className="text-[11px] text-muted-foreground">
-                Finish Clover setup in Settings → Integrations to charge a card.
+                Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.
               </p>
             )}
             <TerminalDeviceField
@@ -6060,6 +6057,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
               locationID={locationID}
               deviceID={deviceID}
               onDeviceChange={setDeviceID}
+              onTipConfig={setTipConfig}
             />
             <div className="flex gap-1.5">
               <Button
@@ -6082,7 +6080,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
                     ? "Waiting for terminal…"
                     : "Saving…"
                   : payWithClover
-                    ? "Pay with Clover"
+                    ? "Pay by card"
                     : payWithTerminal
                       ? "Charge Terminal"
                       : "Confirm Payment"}

@@ -9,8 +9,9 @@ import LocationSelector from '@/components/shared/LocationSelector'
 import { useCloverConnection } from './useCloverConnection'
 import CloverWebhookSetup from './CloverWebhookSetup'
 
-export default function CloverConnectionCard() {
-  const [locationID, setLocationID] = useState(null)
+export default function CloverConnectionCard({ locationID: fixedLocationID = null }) {
+  const [ownLocationID, setOwnLocationID] = useState(null)
+  const locationID = fixedLocationID ?? ownLocationID
   const {
     status,
     merchantId,
@@ -63,7 +64,7 @@ export default function CloverConnectionCard() {
         <div>
           <h3 className="text-base font-semibold text-foreground">Clover</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Accept payments into a location&apos;s Clover merchant account. Pick the location below — this is separate from the header view filter.
+            Accept payments into this location&apos;s Clover merchant account.
           </p>
         </div>
         {locationID && status === 'connected' && <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Connected</Badge>}
@@ -71,16 +72,18 @@ export default function CloverConnectionCard() {
         {locationID && status === 'disconnected' && <Badge variant="secondary">Not Connected</Badge>}
       </div>
 
-      <div className="mt-4 max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
-        <LocationSelector
-          value={locationID}
-          onChange={setLocationID}
-          multiple={false}
-          showAllOption={false}
-          placeholder="Select location to configure…"
-        />
-      </div>
+      {!fixedLocationID && (
+        <div className="mt-4 max-w-sm">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
+          <LocationSelector
+            value={locationID}
+            onChange={setOwnLocationID}
+            multiple={false}
+            showAllOption={false}
+            placeholder="Select location to configure…"
+          />
+        </div>
+      )}
 
       {!locationID && (
         <p className="mt-4 text-sm text-muted-foreground">

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import api from "@/lib/api";
-import { useCloverConnection } from "@/app/settings/payments/clover/useCloverConnection";
+import { useCardProcessor } from "@/app/settings/payments/useCardProcessor";
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from "@/lib/clover";
 import { toast } from "@/components/ui/toast";
 import SearchableSelect from "@/components/ui/searchable-select";
@@ -186,7 +186,9 @@ export default function NewEnrollmentPackageInline({
   const [error, setError] = useState("");
   const [catalogServices, setCatalogServices] = useState([]);
   const [walletBalance, setWalletBalance] = useState(null);
-  const { cloverReady } = useCloverConnection(locationID);
+  // Either processor being ready means a card payment can be taken; the backend
+  // routes to whichever this location uses.
+  const { ready: cardProcessorReady } = useCardProcessor(locationID);
 
   useEffect(() => {
     api.get("/api/calendar-service?limit=200").then((res) => {
@@ -443,14 +445,14 @@ export default function NewEnrollmentPackageInline({
     form.billing.collectNow &&
     form.billing.method === "card" &&
     cardChargeAmount > 0 &&
-    cloverReady;
+    cardProcessorReady;
   const cloverNotConnected =
     step === 2 &&
     form.billingType !== "pay_per_session" &&
     form.billing.collectNow &&
     form.billing.method === "card" &&
     cardChargeAmount > 0 &&
-    !cloverReady;
+    !cardProcessorReady;
 
   const defaultCollectAmount = useMemo(() => {
     if (form.billingType === "one_time") return total;
@@ -1459,7 +1461,7 @@ export default function NewEnrollmentPackageInline({
             onClick={() => handleSubmit()}
             disabled={loading || (serviceOnly ? form.services.length === 0 : !form.packageID) || walletOver || collectWalletShort || cloverNotConnected}
           >
-            {loading ? "Creating…" : payWithClover ? "Pay with Clover" : serviceOnly ? "Create Enrollment & Services" : "Create Enrollment & Package"}
+            {loading ? "Creating…" : payWithClover ? "Pay by card" : serviceOnly ? "Create Enrollment & Services" : "Create Enrollment & Package"}
           </button>
         )}
       </div>

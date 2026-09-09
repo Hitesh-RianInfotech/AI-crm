@@ -7,7 +7,7 @@ import { toast } from '@/components/ui/toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useCloverConnection } from '@/app/settings/payments/clover/useCloverConnection'
+import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from '@/lib/clover'
 
 import { PURCHASE_METHODS } from '@/lib/paymentMethods'
@@ -27,7 +27,7 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
   const [walletBalance, setWalletBalance] = useState(null)
   const [useWallet, setUseWallet] = useState(false)
   const [walletAmount, setWalletAmount] = useState('')
-  const { cloverReady } = useCloverConnection(locationID)
+  const { ready: cloverReady } = useCardProcessor(locationID)
 
   useEffect(() => {
     api.get('/api/membership?isActive=true&limit=200').then((res) => {
@@ -338,12 +338,12 @@ export default function AssignMembershipForm({ customerID, locationID, onSuccess
 
       <div className="flex flex-col gap-1.5 pt-2">
         {cloverNotConnected && (
-          <p className="text-[11px] text-amber-600 text-right">Finish Clover setup in Settings → Integrations to charge a card.</p>
+          <p className="text-[11px] text-amber-600 text-right">Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.</p>
         )}
         <div className="flex justify-end gap-2">
           {onCancel && <Button variant="outline" onClick={onCancel} disabled={submitting}>Cancel</Button>}
           <Button onClick={() => handleSubmit()} disabled={submitting || walletOver || cloverNotConnected} className="bg-brand hover:bg-brand-dark text-brand-foreground">
-            {submitting ? 'Assigning…' : payWithClover ? 'Pay with Clover' : 'Assign Membership'}
+            {submitting ? 'Assigning…' : payWithClover ? 'Pay by card' : 'Assign Membership'}
           </Button>
         </div>
       </div>
