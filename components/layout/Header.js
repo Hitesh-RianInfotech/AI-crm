@@ -193,6 +193,7 @@ import { Button } from "@/components/ui/button";
 import BranchSelector from "@/components/shared/BranchSelector";
 import StaffLocationSwitcher from "@/components/shared/StaffLocationSwitcher";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
+import { CreateEventPurchaseDialog } from "@/app/settings/setup/components/EventsPurchases";
 import { getCurrentUser, logout } from "@/lib/auth";
 import { getInitials, cn } from "@/lib/utils";
 import { isSuperAdmin, hasPermission } from "@/lib/permissions";
@@ -212,7 +213,11 @@ export default function Header({
 }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [createEnrollmentOpen, setCreateEnrollmentOpen] = useState(false);
+  const [enrollMode, setEnrollMode] = useState("service");
+  const [enrollMenuOpen, setEnrollMenuOpen] = useState(false);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
   const profileRef = useRef(null);
+  const enrollRef = useRef(null);
   const user = getCurrentUser();
   const shortName = (user?.name || "").trim().split(/\s+/).filter(Boolean)[0];
   const { theme, setTheme, mounted: themeMounted } = useTheme();
@@ -228,6 +233,18 @@ export default function Header({
       return () => document.removeEventListener("click", handleClickOutside);
     }
   }, [showProfileMenu]);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (enrollRef.current && !enrollRef.current.contains(event.target)) {
+        setEnrollMenuOpen(false);
+      }
+    }
+    if (enrollMenuOpen) {
+      document.addEventListener("click", handleClickOutside);
+      return () => document.removeEventListener("click", handleClickOutside);
+    }
+  }, [enrollMenuOpen]);
   const { inboxCounts } = useInboxHeader();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -465,13 +482,69 @@ export default function Header({
 
               {/* CREATE ENROLLMENT (desktop only) */}
               {hasPermission("calendar", "enrollment", "write") && (
-                <Button
-                  type="button"
-                  className="hidden md:inline-flex h-[38px] rounded-full px-4 text-[13px] font-semibold bg-brand text-brand-foreground hover:bg-brand-dark"
-                  onClick={() => setCreateEnrollmentOpen(true)}
+                <div
+                  className="relative hidden md:block"
+                  ref={enrollRef}
+                  onMouseEnter={() => setEnrollMenuOpen(true)}
+                  onMouseLeave={() => setEnrollMenuOpen(false)}
                 >
-                  <Plus className="h-4 w-4 mr-2" /> Enroll
-                </Button>
+                  <Button
+                    type="button"
+                    className="h-[38px] rounded-full px-4 text-[13px] font-semibold bg-brand text-brand-foreground hover:bg-brand-dark"
+                    onClick={() => setEnrollMenuOpen((v) => !v)}
+                    aria-haspopup="true"
+                    aria-expanded={enrollMenuOpen}
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Enroll
+                  </Button>
+
+                  {enrollMenuOpen && (
+                    <div
+                      className="absolute right-0 top-full pt-2 w-56 z-50"
+                      role="menu"
+                    >
+                      <div className="rounded-lg border border-border bg-popover text-popover-foreground shadow-lg py-1">
+                        <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Scheduled Offerings
+                        </p>
+                        {[
+                          { mode: "service", label: "Services" },
+                          { mode: "package", label: "Packages" },
+                          { mode: "membership", label: "Memberships" },
+                        ].map((o) => (
+                          <button
+                            key={o.mode}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setEnrollMode(o.mode);
+                              setCreateEnrollmentOpen(true);
+                              setEnrollMenuOpen(false);
+                            }}
+                            className="flex w-full items-center px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                        <div className="my-1 border-t border-border" />
+                        <p className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Events &amp; Purchases
+                        </p>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setPurchaseOpen(true);
+                            setEnrollMenuOpen(false);
+                          }}
+                          className="flex w-full items-center px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+                        >
+                          Create Event &amp; Purchase
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* USER PROFILE – click to open dropdown with Logout */}
@@ -528,7 +601,12 @@ export default function Header({
 
       <CreateEnrollmentSheet
         open={createEnrollmentOpen}
+        initialMode={enrollMode}
         onClose={() => setCreateEnrollmentOpen(false)}
+      />
+      <CreateEventPurchaseDialog
+        open={purchaseOpen}
+        onClose={() => setPurchaseOpen(false)}
       />
     </>
   );
