@@ -22,6 +22,12 @@ import {
   countAdvancedCustomerFilters,
 } from '@/lib/customer-page-filters'
 import { buildCustomerQueryParams, filtersToConditionsForForm } from '@/lib/customer-filter-fields'
+import {
+  getActiveCustomerFilterChips,
+  removeCustomerFilterChip,
+  syncCustomerSpendRanking,
+} from '@/lib/customer-active-filter-chips'
+import CustomerActiveFiltersBar from '@/components/customers/CustomerActiveFiltersBar'
 import { formatReasonLabel, normalizeConditionsForForm } from '@/lib/dynamic-list-normalize'
 import { extractLeadReasonsList } from '@/lib/workflow-normalize'
 import {
@@ -435,7 +441,47 @@ export default function CustomersPage() {
 
   const toast = useToast()
 
-  const isFiltered = hasActiveCustomerFilters({ ...filters, search: debouncedSearch, teacherID: teacherFilter })
+  const isFiltered = hasActiveCustomerFilters({
+    ...filters,
+    search: debouncedSearch,
+    teacherID: teacherFilter,
+  })
+  const showTotalSpend = filters?.sortBy === 'payment.totalSpend'
+  const activeFilterChips = useMemo(
+    () =>
+      getActiveCustomerFilterChips(
+        { ...filters, teacherID: teacherFilter },
+        {
+          teachers,
+          locations,
+          tags: tagOptions,
+          memberships,
+          packages,
+          leadReasons,
+          search: debouncedSearch,
+        },
+      ),
+    [
+      filters,
+      teacherFilter,
+      teachers,
+      locations,
+      tagOptions,
+      memberships,
+      packages,
+      leadReasons,
+      debouncedSearch,
+    ],
+  )
+
+  const formatTotalSpend = (customer) => {
+    const raw = customer?.payment?.totalSpend
+    if (raw == null || raw === '') return '—'
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return '—'
+    return `$${n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+  }
+
   const pageCustomerIds = useMemo(() => customers.map((c) => c._id).filter(Boolean), [customers])
   const allOnPageSelected =
     pageCustomerIds.length > 0 && pageCustomerIds.every((id) => selectedIds.includes(id))
@@ -765,13 +811,18 @@ export default function CustomersPage() {
               Save as list
             </Button>
           )}
-          {(hasActiveCustomerFilters(filters) || debouncedSearch || teacherFilter) && (
+          {(hasActiveCustomerFilters({ ...filters, search: debouncedSearch, teacherID: teacherFilter }) ||
+            debouncedSearch ||
+            teacherFilter) && (
             <Button
               variant="ghost"
               size="sm"
               className="h-9"
               onClick={() => {
                 clearSelection()
+                setSearch('')
+                setDebouncedSearch('')
+                setTeacherFilter('')
                 setFilters(EMPTY_CUSTOMER_FILTERS)
               }}
             >
@@ -780,13 +831,47 @@ export default function CustomersPage() {
           )}
         </div>
 
+        {activeFilterChips.length > 0 ? (
+          <CustomerActiveFiltersBar
+            chips={activeFilterChips}
+            onRemoveChip={(chip) => {
+              clearSelection()
+              const next = removeCustomerFilterChip(
+                { ...filters, teacherID: teacherFilter },
+                chip,
+                {
+                  clearSearch: () => {
+                    setSearch('')
+                    setDebouncedSearch('')
+                  },
+                },
+              )
+              setTeacherFilter(next.teacherID || '')
+              setFilters(
+                sanitizeCustomerFilters({
+                  ...next,
+                  teacherID: '',
+                  search: '',
+                }),
+              )
+            }}
+            onClearAll={() => {
+              clearSelection()
+              setSearch('')
+              setDebouncedSearch('')
+              setTeacherFilter('')
+              setFilters(EMPTY_CUSTOMER_FILTERS)
+            }}
+          />
+        ) : null}
+
         <CustomersFilterPanel
           open={filterPanelOpen}
           appliedFilters={filters}
           onClose={() => setFilterPanelOpen(false)}
           onApply={(next) => {
             clearSelection()
-            setFilters(next)
+            setFilters(sanitizeCustomerFilters(syncCustomerSpendRanking(next)))
             setFilterPanelOpen(false)
           }}
           locations={locations}
@@ -843,6 +928,9 @@ export default function CustomersPage() {
                 <TableHead className="text-[12px] font-semibold">Contact</TableHead>
                 <TableHead className="text-[12px] font-semibold">Location</TableHead>
                 <TableHead className="text-[12px] font-semibold">Credits</TableHead>
+                {showTotalSpend ? (
+                  <TableHead className="text-[12px] font-semibold">Total spend</TableHead>
+                ) : null}
                 <TableHead className="text-[12px] font-semibold">Joined</TableHead>
                 <TableHead />
               </TableRow>
@@ -850,13 +938,13 @@ export default function CustomersPage() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center">
+                  <TableCell colSpan={showTotalSpend ? 10 : 9} className="py-12 text-center">
                     <LoadingSpinner />
                   </TableCell>
                 </TableRow>
               ) : customers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="py-14 text-center">
+                  <TableCell colSpan={showTotalSpend ? 10 : 9} className="py-14 text-center">
                     <div className="mx-auto flex max-w-xs flex-col items-center gap-3">
                       <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10">
                         <Users className="h-5 w-5 text-primary" />
@@ -931,6 +1019,11 @@ export default function CustomersPage() {
                         ${Number(customer.prepaidBalance ?? customer.credits ?? 0).toFixed(2)}
                       </span>
                     </TableCell>
+                    {showTotalSpend ? (
+                      <TableCell className="text-[12px] font-medium text-foreground">
+                        {formatTotalSpend(customer)}
+                      </TableCell>
+                    ) : null}
                     <TableCell className="text-[12px] text-muted-foreground">
                       {formatDate(customer.createdAt)}
                     </TableCell>
