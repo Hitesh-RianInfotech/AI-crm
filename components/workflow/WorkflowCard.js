@@ -26,14 +26,33 @@ function formatDate(value) {
   }
 }
 
+function scopeBadge(variant) {
+  if (variant === 'org_default') {
+    return {
+      label: 'Org Default',
+      className: 'bg-violet-500/10 text-violet-700 dark:text-violet-300',
+    }
+  }
+  if (variant === 'global') {
+    return {
+      label: 'Global',
+      className: 'bg-sky-500/10 text-sky-700 dark:text-sky-300',
+    }
+  }
+  return null
+}
+
+/**
+ * @param {'own' | 'org_default' | 'global'} variant
+ */
 export default function WorkflowCard({
   workflow,
-  variant = 'own', // 'own' | 'default'
+  variant = 'own',
   canManageDefaults = false,
-  canEditDefault = false,
+  isSuperAdmin = false,
   onDelete,
   onDuplicate,
-  onToggleDefault,
+  onChangeScope,
   onSetActivation,
   onToggleStatus,
   onToggleFavorite,
@@ -57,15 +76,34 @@ export default function WorkflowCard({
       ? formatReasonLabel(workflow?.reason)
       : ''
 
-  const isDefaultVariant = variant === 'default'
-  const isOwnDefault = Boolean(workflow?.isDefault) && variant === 'own'
+  const isOwn = variant === 'own'
+  const isOrgDefault = variant === 'org_default'
+  const isGlobal = variant === 'global'
+  const badge = scopeBadge(variant)
+
   const isActivated = workflow?.studioActivationStatus === 'active'
-  const isInactive = isDefaultVariant
+  // Org defaults + own use document status; global uses studioActivationStatus.
+  const isInactive = isGlobal
     ? workflow?.studioActivationStatus !== 'active'
     : workflow?.status === 'inactive'
-  const isFavorite = Boolean(workflow?.isFavorite)
+
+  const canEditTemplate = isOrgDefault
+    ? canManageDefaults
+    : isGlobal
+      ? isSuperAdmin
+      : true
+  const canDeleteTemplate = canEditTemplate
+  const showStatusSwitch = isOwn || (isOrgDefault && canManageDefaults) || isGlobal
   const disabled = duplicating || busy
   const openHref = `${detailPathBase}/builder?id=${id}`
+
+  const handleSwitch = () => {
+    if (isGlobal) {
+      onSetActivation?.(id, isActivated ? 'inactive' : 'active')
+      return
+    }
+    onToggleStatus?.(id, isInactive ? 'active' : 'inactive')
+  }
 
   return (
     <Card
@@ -75,38 +113,39 @@ export default function WorkflowCard({
       )}
     >
       <div className="absolute right-3 top-3 flex items-center gap-1">
-        {isDefaultVariant || isOwnDefault ? (
-          <span className="mr-1 inline-flex h-6 items-center rounded-full bg-violet-500/10 px-2 text-[10px] font-semibold text-violet-700 dark:text-violet-300">
-            Default
+        {badge ? (
+          <span
+            className={cn(
+              'mr-1 inline-flex h-6 items-center rounded-full px-2 text-[10px] font-semibold',
+              badge.className,
+            )}
+          >
+            {badge.label}
           </span>
         ) : null}
-        <Switch
-          checked={!isInactive}
-          onChange={() => {
-            if (isDefaultVariant) {
-              onSetActivation?.(id, isActivated ? 'inactive' : 'active')
-            } else {
-              onToggleStatus?.(id, isInactive ? 'active' : 'inactive')
-            }
-          }}
-          disabled={disabled}
-          title={isInactive ? 'Set active' : 'Set inactive'}
-          className="scale-75 disabled:opacity-40"
-        />
-        {!isDefaultVariant ? (
+        {showStatusSwitch ? (
+          <Switch
+            checked={!isInactive}
+            onChange={handleSwitch}
+            disabled={disabled}
+            title={isInactive ? 'Set active' : 'Set inactive'}
+            className="scale-75 disabled:opacity-40"
+          />
+        ) : null}
+        {isOwn ? (
           <button
             type="button"
             onClick={() => onToggleFavorite?.(id)}
             disabled={disabled}
-            title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+            title={workflow?.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
             className={cn(
               'flex h-7 w-7 items-center justify-center rounded-full transition-all duration-200 disabled:opacity-40',
-              isFavorite
+              workflow?.isFavorite
                 ? 'text-red-500 hover:bg-red-50'
                 : 'text-muted-foreground hover:bg-muted hover:text-red-400',
             )}
           >
-            <Heart className={cn('h-4 w-4', isFavorite && 'fill-current')} />
+            <Heart className={cn('h-4 w-4', workflow?.isFavorite && 'fill-current')} />
           </button>
         ) : null}
       </div>
@@ -145,72 +184,34 @@ export default function WorkflowCard({
           </div>
         </div>
 
-        {isDefaultVariant ? (
-          <div className="flex gap-2">
-            {canEditDefault ? (
-              <Button
-                variant="gradient"
-                size="sm"
-                className="flex-1"
-                onClick={() => router.push(openHref)}
-              >
-                <Pencil className="mr-1.5 h-3.5 w-3.5" />
-                Edit
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              disabled={disabled}
-              onClick={() => onDuplicate?.(id)}
-            >
-              {duplicating ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Copy className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {duplicating ? 'Cloning…' : 'Clone'}
-            </Button>
-            {canEditDefault && onDelete ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => onDelete?.(id)}
-                disabled={disabled}
-                title="Delete default template"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex gap-2">
+        <div className="flex gap-2">
+          {canEditTemplate ? (
             <Button
               variant="gradient"
               size="sm"
               className="flex-1"
-              disabled={isInactive}
+              disabled={isOwn && isInactive}
               onClick={() => router.push(openHref)}
             >
               <Pencil className="mr-1.5 h-3.5 w-3.5" />
-              Open
+              {isOwn ? 'Open' : 'Edit'}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1"
-              disabled={disabled || isInactive}
-              onClick={() => onDuplicate?.(id)}
-            >
-              {duplicating ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Copy className="mr-1.5 h-3.5 w-3.5" />
-              )}
-              {duplicating ? 'Cloning…' : 'Clone'}
-            </Button>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1"
+            disabled={disabled || (isOwn && isInactive)}
+            onClick={() => onDuplicate?.(id)}
+          >
+            {duplicating ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Copy className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            {duplicating ? 'Cloning…' : 'Clone'}
+          </Button>
+          {(isOwn || canDeleteTemplate) && onDelete ? (
             <Button
               variant="ghost"
               size="icon"
@@ -221,30 +222,50 @@ export default function WorkflowCard({
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
-          </div>
-        )}
+          ) : null}
+        </div>
 
-        {canManageDefaults && !isDefaultVariant ? (
+        {canManageDefaults && isOwn ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="mt-2 w-full"
             disabled={disabled}
-            onClick={() => onToggleDefault?.(id)}
+            onClick={() => onChangeScope?.(id, null, 'promote')}
           >
-            {busy ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Star className={cn('mr-1.5 h-3.5 w-3.5', isOwnDefault && 'fill-current text-violet-600')} />
-            )}
-            {isOwnDefault ? 'Remove default' : 'Mark as default'}
+            <Star className="mr-1.5 h-3.5 w-3.5" />
+            Mark as default
           </Button>
         ) : null}
 
-        {isDefaultVariant && !canEditDefault ? (
+        {canManageDefaults && (isOrgDefault || (isGlobal && isSuperAdmin)) ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 w-full"
+            disabled={disabled}
+            onClick={() =>
+              onChangeScope?.(
+                id,
+                isOrgDefault ? 'organization_default' : 'global',
+                'change',
+              )
+            }
+          >
+            Change scope
+          </Button>
+        ) : null}
+
+        {isOrgDefault && !canManageDefaults ? (
           <p className="mt-2 text-[11px] leading-snug text-slate-500">
-            Clone to customize for your location. Use the switch for Active / Inactive.
+            Organisation template — clone to customize for your location.
+          </p>
+        ) : null}
+        {isGlobal && !isSuperAdmin ? (
+          <p className="mt-2 text-[11px] leading-snug text-slate-500">
+            Global template — use the switch to opt your studio in or out. Clone to customize.
           </p>
         ) : null}
       </CardContent>
