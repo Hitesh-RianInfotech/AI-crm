@@ -5,7 +5,7 @@ import { Select } from '@/components/ui/select'
 const DEFAULT_OPTIONS = [10, 25, 50, 100]
 
 /**
- * "Rows [ 50 v ]" page-size selector for paginated list views.
+ * "Rows [ 10 v ]" page-size selector for paginated list views.
  * Controlled — parent owns the value and resets to page 1 on change.
  */
 export function RowsPerPage({ value, onChange, options = DEFAULT_OPTIONS, disabled }) {

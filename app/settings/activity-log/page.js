@@ -49,7 +49,7 @@ export default function ActivityLogPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [total, setTotal] = useState(0)
-  const [limit, setLimit] = useState(20)
+  const [limit, setLimit] = useState(10)
   const toast = useToast()
 
   useEffect(() => {

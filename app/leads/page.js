@@ -63,7 +63,7 @@ const LEAD_CSV_FIELDS = [
   { key: 'createdAt', header: 'createdat', sample: '2026-01-01' },
 ]
 
-const DEFAULT_ROWS_PER_PAGE = 50
+const DEFAULT_ROWS_PER_PAGE = 10
 
 function toRecipientLead(lead) {
   if (!lead?._id) return null
