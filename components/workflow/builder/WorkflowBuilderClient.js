@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 import { getEffectiveBranch } from '@/lib/auth'
-import { canManageDefaultWorkflows } from '@/lib/permissions'
+import { canManageDefaultWorkflows, isSuperAdmin } from '@/lib/permissions'
 import { useWorkflowOptions } from '@/lib/useWorkflowOptions'
 import { extractDynamicListsList } from '@/lib/dynamic-list-normalize'
 import { hydrateContactGroupsFromAudience } from '@/lib/workflow-contact'
@@ -51,7 +51,7 @@ export default function WorkflowBuilderClient() {
   const [loadError, setLoadError] = useState('')
   const [publishOpen, setPublishOpen] = useState(false)
   const [readOnly, setReadOnly] = useState(false)
-  const [isDefaultTemplate, setIsDefaultTemplate] = useState(false)
+  const [workflowScope, setWorkflowScope] = useState(null)
 
   const [dynamicLists, setDynamicLists] = useState([])
   const { forms, reasons } = useWorkflowOptions(true)
@@ -86,7 +86,7 @@ export default function WorkflowBuilderClient() {
     if (!id) {
       const blank = createBlankWorkflow()
       setReadOnly(false)
-      setIsDefaultTemplate(false)
+      setWorkflowScope(null)
       loadWorkflowGraph({
         workflowId: null,
         workflowName: blank.workflowName,
@@ -101,14 +101,19 @@ export default function WorkflowBuilderClient() {
     setLoading(true)
     setLoadError('')
     setReadOnly(false)
-    setIsDefaultTemplate(false)
+    setWorkflowScope(null)
     api.get(`/api/workflow/${id}`).then(async (res) => {
       if (cancelled) return
       if (res?.success && res.data) {
         const data = res.data
-        setIsDefaultTemplate(Boolean(data.isDefault))
-        if (data.isDefault) {
-          // Shared default templates: require Default Workflows permission.
+        const scope =
+          data.workflowScope === 'organization_default' || data.workflowScope === 'global'
+            ? data.workflowScope
+            : null
+        setWorkflowScope(scope)
+        if (scope === 'global') {
+          setReadOnly(!isSuperAdmin())
+        } else if (scope === 'organization_default') {
           setReadOnly(!canManageDefaultWorkflows())
         } else {
           setReadOnly(false)
@@ -208,9 +213,12 @@ export default function WorkflowBuilderClient() {
         meta?.description != null ? String(meta.description) : state.workflowDescription || ''
       const favorite =
         meta?.isFavorite != null ? Boolean(meta.isFavorite) : Boolean(state.isFavorite)
-      const markDefault = meta
-        ? Boolean(meta.isDefault)
-        : isDefaultTemplate
+      const nextScope = meta
+        ? meta.workflowScope === 'organization_default' || meta.workflowScope === 'global'
+          ? meta.workflowScope
+          : null
+        : workflowScope
+      const isScoped = nextScope === 'organization_default' || nextScope === 'global'
       const isActive =
         meta?.status != null
           ? meta.status === 'active'
@@ -232,8 +240,9 @@ export default function WorkflowBuilderClient() {
         nodes: state.nodes,
         edges: state.edges,
         isActive,
-        locationID: markDefault ? null : getEffectiveBranch() || null,
-        isDefault: markDefault,
+        locationID: isScoped ? null : getEffectiveBranch() || null,
+        // Only send scope on create — updates use PATCH /scope separately.
+        workflowScope: state.workflowId ? null : nextScope,
       })
 
       if (!ok) {
@@ -248,11 +257,27 @@ export default function WorkflowBuilderClient() {
         ? await api.patch(`/api/workflow/${existingId}`, payload)
         : await api.post('/api/workflow/', payload)
 
+      if (res?.success && existingId && nextScope !== workflowScope) {
+        const scopeRes = await api.patch(`/api/workflow/${existingId}/scope`, {
+          workflowScope: nextScope,
+        })
+        if (!scopeRes?.success) {
+          setSaving(false)
+          setSaveStatus('unsaved')
+          toast.error(scopeRes?.error || 'Saved workflow but failed to update scope.')
+          return false
+        }
+      }
+
       setSaving(false)
 
       if (res?.success) {
         const saved = res.data
-        setIsDefaultTemplate(Boolean(saved?.isDefault ?? markDefault))
+        const savedScope =
+          saved?.workflowScope === 'organization_default' || saved?.workflowScope === 'global'
+            ? saved.workflowScope
+            : nextScope
+        setWorkflowScope(savedScope ?? null)
         const newId = saved?._id || saved?.id || existingId
         if (newId && newId !== existingId) {
           setWorkflowId(newId)
@@ -275,7 +300,7 @@ export default function WorkflowBuilderClient() {
     },
     [
       readOnly,
-      isDefaultTemplate,
+      workflowScope,
       setIsActive,
       setIsFavorite,
       setSaveStatus,
@@ -314,7 +339,7 @@ export default function WorkflowBuilderClient() {
           description: workflowDescription,
           status: isActive ? 'active' : 'inactive',
           isFavorite,
-          isDefault: isDefaultTemplate,
+          workflowScope,
         }}
       />
       <WorkflowStepGuide
@@ -324,8 +349,9 @@ export default function WorkflowBuilderClient() {
 
       {readOnly ? (
         <div className="border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-[12px] text-violet-800 dark:text-violet-200">
-          This is a shared default template. Duplicate it from the workflows list to customize for
-          your location.
+          This is a shared{' '}
+          {workflowScope === 'global' ? 'global' : 'organisation default'} template. Duplicate it
+          from the workflows list to customize for your location.
         </div>
       ) : null}
 
