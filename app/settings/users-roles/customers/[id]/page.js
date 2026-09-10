@@ -6606,6 +6606,11 @@ function PaymentsTab({ customerID }) {
 function deriveEventStatus(ev) {
   const explicit = ev.status;
   if (explicit && explicit !== "scheduled") return explicit;
+  // Same rule as deriveEffectiveStatus() in app/calendar/page.js: an
+  // unallocated lesson is held back from completion on the server too, so
+  // ageing it into "Completed" here would hide the thing staff must act on —
+  // a delivered lesson no package has paid for.
+  if (ev.allocation?.status === "unallocated") return explicit || "scheduled";
   if (ev.endDateTime && new Date(ev.endDateTime) < new Date())
     return "completed";
   return explicit || "scheduled";
@@ -7594,21 +7599,18 @@ function LessonsTab({ customer }) {
     const params = new URLSearchParams({
       start: past.toISOString(),
       end: future.toISOString(),
-      limit: 500,
     });
-    api.get(`/api/calendar?${params}`).then((res) => {
+    // Query the customer directly. The org-wide /api/calendar list this used to
+    // page through is capped and sorted oldest-first, so it returned the first
+    // N events in the whole studio and this customer's recent lessons — the
+    // unallocated ones especially — fell off the end before the filter ran.
+    api.get(`/api/calendar/customer/${customer._id}?${params}`).then((res) => {
       if (res.success && Array.isArray(res.data)) {
-        const filtered = res.data
-          .filter((ev) => {
-            const ids = Array.isArray(ev.customerIDs) ? ev.customerIDs : [];
-            return ids.some(
-              (c) => String(c?._id ?? c) === String(customer._id),
-            );
-          })
-          .sort(
+        setEvents(
+          [...res.data].sort(
             (a, b) => new Date(b.startDateTime) - new Date(a.startDateTime),
-          );
-        setEvents(filtered);
+          ),
+        );
       }
       setLoading(false);
     });
@@ -7812,6 +7814,14 @@ function LessonsTab({ customer }) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {ev.allocation?.status === "unallocated" && (
+                    <span
+                      className="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-warning/20 text-warning"
+                      title="Not allocated to a package — nothing has paid for this lesson"
+                    >
+                      Unallocated
+                    </span>
+                  )}
                   {isPersonalNoShow && (
                     <span className="rounded-full px-2.5 py-0.5 text-[11px] font-medium bg-warning/10 text-warning">
                       No Show
