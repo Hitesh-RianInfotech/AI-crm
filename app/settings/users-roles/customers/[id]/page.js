@@ -52,6 +52,7 @@ import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import LocationSelector from "@/components/shared/LocationSelector";
 import SendPaymentLinkMenu from "@/components/payments/SendPaymentLinkMenu";
 import api from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import { resolveLocationID } from "@/app/settings/payments/clover/useCloverConnection";
 import { useCardProcessor } from "@/app/settings/payments/useCardProcessor";
 import {
@@ -61,6 +62,7 @@ import {
   CHECKOUT_TOAST,
 } from "@/lib/clover";
 import { PAYMENT_METHODS } from "@/lib/paymentMethods";
+import { dateInputToISO, todayDateInput } from "@/lib/studioLocalDate";
 import WalletShortfallField, {
   walletPaymentFields,
 } from "@/components/payments/WalletShortfallField";
@@ -1788,9 +1790,7 @@ function PayInstallmentDialog({
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [amount, setAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
-  );
+  const [paymentDate, setPaymentDate] = useState(todayDateInput);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   const { ready: cloverReady } = useCardProcessor(locationID || plan);
@@ -1840,7 +1840,7 @@ function PayInstallmentDialog({
       {
         installmentIndex,
         amount: num,
-        paymentDate: paymentDate || undefined,
+        paymentDate: dateInputToISO(paymentDate),
         ...walletPaymentFields({
           method,
           shortfallMethod,
@@ -2195,7 +2195,7 @@ function SetupPaymentPlanDialog({
     if (open) {
       setNumberOfInstallments(3);
       setFrequency("monthly");
-      setStartDate(new Date().toISOString().slice(0, 10));
+      setStartDate(todayDateInput());
       setCollectNow(false);
       setMethod("cash");
     }
@@ -3751,6 +3751,10 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
   const [extendTarget, setExtendTarget] = useState(null);
   const [extendDate, setExtendDate] = useState("");
   const [extending, setExtending] = useState(false);
+  // Services sold on their own are given a fixed one-year validity at purchase
+  // (see SERVICE_ONLY_EXPIRY_DAYS) — this is the only place it can be changed,
+  // and only by roles that can write enrollments. Super admin passes through.
+  const canEditValidity = hasPermission("calendar", "enrollment", "write");
   const [payInstallTarget, setPayInstallTarget] = useState(null);
   const [changeInstallDateTarget, setChangeInstallDateTarget] = useState(null);
   const [addInstallTarget, setAddInstallTarget] = useState(null);
@@ -4141,11 +4145,11 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
       { expiryDate: extendDate },
     );
     if (res.success) {
-      toast.success("Expiry date extended.");
+      toast.success("Validity updated.");
       setExtendTarget(null);
       setExtendDate("");
       load();
-    } else toast.error(res.error || "Failed to extend expiry.");
+    } else toast.error(res.error || "Failed to update validity.");
     setExtending(false);
   }
 
@@ -4362,26 +4366,30 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                         >
                           {cp.status}
                         </span>
-                        {cp.status !== "cancelled" && cp.expiryDate && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2.5 text-[11px] font-medium"
-                            onClick={() => {
-                              setExtendDate(
-                                new Date(cp.expiryDate)
-                                  .toISOString()
-                                  .slice(0, 10),
-                              );
-                              setExtendTarget({
-                                _id: enr._id,
-                                packageName: cp.packageName,
-                              });
-                            }}
-                          >
-                            Extend
-                          </Button>
-                        )}
+                        {canEditValidity &&
+                          cp.status !== "cancelled" &&
+                          cp.expiryDate && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2.5 text-[11px] font-medium"
+                              onClick={() => {
+                                setExtendDate(
+                                  new Date(cp.expiryDate)
+                                    .toISOString()
+                                    .slice(0, 10),
+                                );
+                                setExtendTarget({
+                                  _id: enr._id,
+                                  packageName:
+                                    enrollmentDisplayName(enr) ||
+                                    cp.packageName,
+                                });
+                              }}
+                            >
+                              Change validity
+                            </Button>
+                          )}
                         {cp.status === "active" && (
                           <Button
                             variant="outline"
@@ -5045,7 +5053,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
         onSuccess={load}
       />
 
-      {/* Extend expiry */}
+      {/* Change validity (expiry date) */}
       <Dialog
         open={Boolean(extendTarget)}
         onOpenChange={(v) => {
@@ -5057,14 +5065,14 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Extend Package Expiry</DialogTitle>
+            <DialogTitle>Change Validity</DialogTitle>
           </DialogHeader>
           <p className="text-[13px] text-muted-foreground mt-1">
             Set a new expiry date for{" "}
             <span className="font-semibold text-foreground">
               {extendTarget?.packageName}
             </span>
-            . If the new date is in the future the package will be reactivated.
+            . If the new date is in the future it will be reactivated.
           </p>
           <div className="mt-4">
             <label className="text-[12px] font-medium text-foreground block mb-1">
@@ -5093,7 +5101,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
               disabled={extending || !extendDate}
               onClick={handleEnrExtend}
             >
-              {extending ? "Saving…" : "Extend Expiry"}
+              {extending ? "Saving…" : "Save Validity"}
             </Button>
           </div>
         </DialogContent>
@@ -5824,9 +5832,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
   const [mode, setMode] = useState(null); // "pay" | "change-date"
   const [amount, setAmount] = useState(String(outstanding.toFixed(2)));
   const [method, setMethod] = useState("cash");
-  const [paymentDate, setPaymentDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [paymentDate, setPaymentDate] = useState(todayDateInput);
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [deviceID, setDeviceID] = useState("");
@@ -5874,7 +5880,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
         amountDue: num,
       }),
       ...(payWithTerminal ? { deviceID, ...tipConfig } : {}),
-      ...(paymentDate ? { paymentDate } : {}),
+      ...(paymentDate ? { paymentDate: dateInputToISO(paymentDate) } : {}),
     });
     if (res.success) {
       if (res.data?.checkoutUrl) {
@@ -6034,7 +6040,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
             <input
               type="date"
               value={paymentDate}
-              max={new Date().toISOString().slice(0, 10)}
+              max={todayDateInput()}
               onChange={(e) => setPaymentDate(e.target.value)}
               className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-primary"
             />

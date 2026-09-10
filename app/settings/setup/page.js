@@ -37,7 +37,7 @@ import {
   ProductsTab, EventTypesTab, SavedTemplatesTab, CreateEventPurchaseDialog,
 } from './components/EventsPurchases'
 
-const ROWS_PER_PAGE = 50
+const ROWS_PER_PAGE = 10
 
 // Fetch a package/membership and POST a copy of it, then open the copy's editor.
 async function duplicateCatalogEntity(kind, id, router) {

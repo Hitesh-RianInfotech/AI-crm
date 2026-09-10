@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import SearchInput from '@/components/ui/search-input'
 import api from '@/lib/api'
+import { dateInputToISO, todayDateInput } from '@/lib/studioLocalDate'
 import { toast } from '@/components/ui/toast'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 
@@ -555,7 +556,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
   const [saving, setSaving] = useState(false)
 
   // Billing
-  const todayISO = () => new Date().toISOString().slice(0, 10)
+  const todayISO = todayDateInput
   const [billingType, setBillingType] = useState('one_time') // one_time | payment_plan | flexible
   const [collectNow, setCollectNow] = useState(true)
   const [payMethod, setPayMethod] = useState('cash') // cash | card | cheque | other
@@ -677,7 +678,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
             : undefined
           const payRes = await api.post('/api/payment', {
             customerID: customer._id, purchaseID: purchase._id, type: 'event_purchase',
-            amount: payable, method: payMethod, paymentDate: collectDate || undefined,
+            amount: payable, method: payMethod, paymentDate: dateInputToISO(collectDate),
             walletAmount: walletApplied > 0 ? walletApplied : undefined, notes: name.trim(),
             tip,
           })

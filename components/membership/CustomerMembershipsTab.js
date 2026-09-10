@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, RotateCcw, X, Infinity as InfinityIcon, ChevronDown, Snowflake } from 'lucide-react'
 import api from '@/lib/api'
-import { formatStudioDate, formatStudioTime } from '@/lib/studioLocalDate'
+import { formatStudioDate, formatStudioTime, dateInputToISO, todayDateInput } from '@/lib/studioLocalDate'
 import { useStudioTimezone } from '@/lib/hooks/useStudioTimezone'
 import { toast } from '@/components/ui/toast'
 import { Button } from '@/components/ui/button'
@@ -43,7 +43,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
   const [method, setMethod] = useState('cash')
   const [shortfallMethod, setShortfallMethod] = useState('cash')
   const [walletBalance, setWalletBalance] = useState(0)
-  const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [paymentDate, setPaymentDate] = useState(todayDateInput)
   const [paying, setPaying] = useState(false)
   const { ready: cloverReady } = useCardProcessor(locationID || target?.plan)
 
@@ -74,7 +74,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
     try {
       const r = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
         installmentIndex: index,
-        paymentDate: paymentDate || undefined,
+        paymentDate: dateInputToISO(paymentDate),
         ...paymentFields,
       })
       if (r.success) {

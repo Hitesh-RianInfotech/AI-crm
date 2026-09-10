@@ -16,6 +16,16 @@ function todayISO() {
   return new Date(d.getTime() - offset * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// Selling loose services is meant to be a two-field job, so the validity isn't
+// asked for: every service enrollment gets a year. Staff holding
+// calendar.enrollment write can change it afterwards from the customer's
+// profile (Enrollments → Extend).
+const SERVICE_ONLY_EXPIRY_DAYS = 365;
+
+// Loose services bill either in full now or against an open balance — the
+// installment-scheduling types belong to packages.
+const SERVICE_ONLY_BILLING_TYPES = ["one_time", "flexible"];
+
 const BLANK_FORM = {
   teacherID: "",
   label: "",
@@ -196,6 +206,15 @@ export default function NewEnrollmentPackageInline({
     });
   }, []);
 
+  // Picking a package on the Packages tab adopts that package's billing type,
+  // which may be one the Service tab doesn't offer. Switching tabs would then
+  // leave an installment schedule active with no button to change it.
+  useEffect(() => {
+    if (serviceOnly && !SERVICE_ONLY_BILLING_TYPES.includes(form.billingType)) {
+      setForm((p) => ({ ...p, billingType: "one_time" }));
+    }
+  }, [serviceOnly, form.billingType]);
+
   useEffect(() => {
     if (!customerID) { setWalletBalance(null); return; }
     api.get(`/api/wallet/${customerID}/balance`).then((res) => {
@@ -257,7 +276,11 @@ export default function NewEnrollmentPackageInline({
           serviceCode: catalogSvc.serviceCode || "",
           serviceName: catalogSvc.serviceName || "",
           color: catalogSvc.color || "#6366f1",
-          numberOfSessions: 0,
+          // You are selling at least one session. Defaulting to 0 sold a $0
+          // enrollment with no sessions, which no booking can ever draw from —
+          // the booking panel filters on sessionsRemaining > 0, so the student
+          // was pushed straight to the unallocated picker instead.
+          numberOfSessions: 1,
           pricePerSession: catalogSvc.isChargeable !== false ? Number(catalogSvc.price || 0) : 0,
           discountType: "none",
           discountAmount: 0,
@@ -526,6 +549,9 @@ export default function NewEnrollmentPackageInline({
       Number(form.billing.collectAmount) > 0;
     const payload = {
       ...form,
+      // The Service tab asks for neither, so it never sends a stale value left
+      // behind by a visit to the Packages tab.
+      ...(serviceOnly ? { label: "", expiryDays: SERVICE_ONLY_EXPIRY_DAYS } : {}),
       billing: {
         ...form.billing,
         collectNow: collect,
@@ -580,49 +606,33 @@ export default function NewEnrollmentPackageInline({
               placeholder="Select teacher…"
             />
 
-            <label className="text-[11px] font-medium text-muted-foreground">
-              Label (optional)
-            </label>
-            <input
-              value={form.label}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, label: e.target.value }))
-              }
-              placeholder="e.g. Term 1 2026, Trial…"
-              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
-            />
-
-            {serviceOnly ? (
+            {!serviceOnly && (
               <>
                 <label className="text-[11px] font-medium text-muted-foreground">
-                  Validity (days, optional)
+                  Label (optional)
                 </label>
                 <input
-                  type="number"
-                  min="0"
-                  value={form.expiryDays}
+                  value={form.label}
                   onChange={(e) =>
-                    setForm((p) => ({ ...p, expiryDays: e.target.value }))
+                    setForm((p) => ({ ...p, label: e.target.value }))
                   }
-                  placeholder="No expiry"
+                  placeholder="e.g. Term 1 2026, Trial…"
                   className="h-9 w-full rounded-lg border border-border bg-background px-3 text-[12px]"
                 />
+
+                <label className="text-[11px] font-medium text-muted-foreground">
+                  Package
+                </label>
+                <SearchableSelect
+                  value={form.packageID}
+                  onChange={(v) => handlePkgChange(v)}
+                  options={packageTemplates.map((p) => ({
+                    value: p._id,
+                    label: p.packageName,
+                  }))}
+                  placeholder="Select package…"
+                />
               </>
-            ) : (
-            <label className="text-[11px] font-medium text-muted-foreground">
-              Package
-            </label>
-            )}
-            {!serviceOnly && (
-            <SearchableSelect
-              value={form.packageID}
-              onChange={(v) => handlePkgChange(v)}
-              options={packageTemplates.map((p) => ({
-                value: p._id,
-                label: p.packageName,
-              }))}
-              placeholder="Select package…"
-            />
             )}
             {!serviceOnly && selectedPkg && (
               <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
@@ -644,6 +654,9 @@ export default function NewEnrollmentPackageInline({
                 </p>
               </div>
             )}
+            <label className="text-[11px] font-medium text-muted-foreground">
+              Purchase date
+            </label>
             <input
               type="date"
               value={form.purchaseDate}
@@ -849,7 +862,9 @@ export default function NewEnrollmentPackageInline({
                 { v: "payment_plan", label: "Payment Plan" },
                 { v: "flexible", label: "Flexible" },
                 { v: "pay_per_session", label: "Pay Per Session", disabled: !canPayPerSession },
-              ].map(({ v, label, disabled }) => (
+              ]
+                .filter(({ v }) => !serviceOnly || SERVICE_ONLY_BILLING_TYPES.includes(v))
+                .map(({ v, label, disabled }) => (
                 <button
                   key={v}
                   type="button"
@@ -868,7 +883,7 @@ export default function NewEnrollmentPackageInline({
                 </button>
               ))}
             </div>
-            {!canPayPerSession && form.services.length > 0 && (
+            {!serviceOnly && !canPayPerSession && form.services.length > 0 && (
               <p className="text-[10px] text-muted-foreground">
                 Pay Per Session requires exactly 1 chargeable service.{" "}
                 {chargeableServices.length === 0 ? "No chargeable services in this package." : `This package has ${chargeableServices.length} chargeable services.`}

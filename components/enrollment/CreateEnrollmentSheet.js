@@ -6,6 +6,7 @@ import SearchableSelect from '@/components/ui/searchable-select'
 import NewEnrollmentPackageInline from '@/app/calendar/components/NewEnrollmentPackageInline'
 import AssignMembershipForm from '@/components/membership/AssignMembershipForm'
 import api from '@/lib/api'
+import { dateInputToISO } from '@/lib/studioLocalDate'
 
 const SHEET_WIDTH = '640px'
 
@@ -253,7 +254,7 @@ export default function CreateEnrollmentSheet({
         const payRes = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
           installmentIndex: firstPending,
           method,
-          paymentDate: payload.billing?.collectDate || undefined,
+          paymentDate: dateInputToISO(payload.billing?.collectDate),
         })
         if (!payRes?.success) {
           setError(payRes?.error || 'Enrollment created but first installment payment failed.')
@@ -269,7 +270,7 @@ export default function CreateEnrollmentSheet({
         type: 'package_purchase',
         amount: collectAmount,
         method,
-        paymentDate: payload.billing?.collectDate || undefined,
+        paymentDate: dateInputToISO(payload.billing?.collectDate),
       })
       if (!payRes?.success) {
         setError(payRes?.error || 'Enrollment created but initial payment failed.')

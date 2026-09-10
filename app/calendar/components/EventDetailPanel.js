@@ -144,6 +144,22 @@ function isUnallocated(event) {
   return event?.allocation?.status === "unallocated";
 }
 
+// Whether a student's charge record actually means they've paid for the lesson.
+// Cash/credit/membership charges are settled on the spot; a package charge only
+// counts once the package it draws from is fully collected. A payment-plan or
+// flexible package that still owes a balance leaves the student Unpaid — which
+// is exactly what the customer's Lessons tab shows (deriveEventPaid there).
+function chargeCoversPayment(ch, event) {
+  if (ch.method !== "package") return true;
+  if (event?.packageBillingType === "flexible") return false;
+  const pkg = ch.enrollmentID?.package ?? ch.customerPackageID;
+  if (!pkg) return true; // no package data on the payload — stay optimistic
+  if (pkg.paymentStatus) return pkg.paymentStatus === "paid";
+  const collected = Number(pkg.amountCollected ?? 0);
+  const total = Number(pkg.totalPaid ?? 0);
+  return total > 0 && collected >= total;
+}
+
 // One stable id for a funding option regardless of which kind it is — the three
 // id fields are mutually exclusive.
 function fundingKey(t) {
@@ -368,7 +384,11 @@ function GroupStudentRoster({
     );
     setEventMemberIds(persistedMemberIds);
     const charges = evRes.data?.charges || [];
-    const charged = new Set(charges.map((ch) => String(ch.customerID)));
+    const charged = new Set(
+      charges
+        .filter((ch) => chargeCoversPayment(ch, event))
+        .map((ch) => String(ch.customerID)),
+    );
     setChargedIds(charged);
     // Prefer the package/membership this event actually charged against — the
     // roster's fallback (scanning all active enrollments) can pick a different,
@@ -626,7 +646,9 @@ function GroupStudentRoster({
     const res = await api.put(`/api/calendar/${eventId}`, body);
     if (res.success) {
       const charged = new Set(
-        (res.data?.charges || []).map((ch) => String(ch.customerID)),
+        (res.data?.charges || [])
+          .filter((ch) => chargeCoversPayment(ch, event))
+          .map((ch) => String(ch.customerID)),
       );
       setChargedIds(charged);
       setEnrolled((prev) => [...prev, customer]);
@@ -692,7 +714,9 @@ function GroupStudentRoster({
     });
     if (res.success) {
       const charged = new Set(
-        (res.data?.charges || []).map((ch) => String(ch.customerID)),
+        (res.data?.charges || [])
+          .filter((ch) => chargeCoversPayment(ch, event))
+          .map((ch) => String(ch.customerID)),
       );
       setChargedIds(charged);
       setEnrolled((prev) => prev.filter((c) => String(c._id) !== customerId));
@@ -797,7 +821,11 @@ function GroupStudentRoster({
       if (res.data?.checkoutUrl) navigateCheckoutTab(checkoutTab, res.data.checkoutUrl);
       else closeCheckoutTab(checkoutTab);
       const charges = res.data?.charges || [];
-      const charged = new Set(charges.map((ch) => String(ch.customerID)));
+      const charged = new Set(
+        charges
+          .filter((ch) => chargeCoversPayment(ch, event))
+          .map((ch) => String(ch.customerID)),
+      );
       setChargedIds(charged);
       setPayingId(null);
     } else {

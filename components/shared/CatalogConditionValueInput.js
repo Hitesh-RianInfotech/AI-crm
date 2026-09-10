@@ -215,7 +215,7 @@ export default function CatalogConditionValueInput({
     )
   }
 
-  if (def.inputType === 'date' && (operator === 'gt' || operator === 'lt' || operator === 'eq')) {
+  if (def.inputType === 'date' && (operator === 'gt' || operator === 'lt' || operator === 'gte' || operator === 'lte' || operator === 'eq')) {
     return (
       <input type="date" value={String(value || '')} onChange={(e) => onChange(e.target.value)} className={inputClass} />
     )
