@@ -10,6 +10,7 @@ import api from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
 import StatusSelector from '@/components/shared/StatusSelector'
 import { Select } from '@/components/ui/select'
+import Switch from '@/components/ui/switch'
 import {
   DEFAULT_LOCATION_TIMEZONE,
   getTimezoneSelectOptions,
@@ -18,11 +19,75 @@ import {
 
 const TIMEZONE_OPTIONS = getTimezoneSelectOptions()
 
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => ({
-  value: i,
-  label: i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`,
-}))
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
+
+function snapHalfHour(n, fallback) {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return fallback
+  return Math.round(v * 2) / 2
+}
+
+/** Decimal hours (8.5) → `HH:MM` for a native time input. Close at 24 → 00:00. */
+function hourValueToTimeInput(hourValue, role) {
+  const v = Number(hourValue)
+  if (role === 'close' && v === 24) return '00:00'
+  const totalMin = Math.round((Number.isFinite(v) ? v : 0) * 60)
+  const h24 = Math.floor(totalMin / 60) % 24
+  const mins = totalMin % 60 >= 30 ? 30 : 0
+  return `${String(h24).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+}
+
+/** Native `HH:MM` → decimal hours, snapped to :00 / :30. Close 00:00 → 24. */
+function timeInputToHourValue(hhmm, role) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''))
+  if (!match) return role === 'close' ? 20 : 9
+  let hour = Number(match[1])
+  let minute = Number(match[2])
+  minute = minute >= 45 ? 60 : minute >= 15 ? 30 : 0
+  if (minute === 60) {
+    hour += 1
+    minute = 0
+  }
+  hour = Math.max(0, Math.min(24, hour))
+  const value = hour + (minute === 30 ? 0.5 : 0)
+  if (role === 'close' && (value === 0 || hour >= 24)) return 24
+  if (role === 'open') return Math.min(23.5, value)
+  return Math.min(24, Math.max(0.5, value))
+}
+
+const timeInputClass =
+  'h-9 w-[7.75rem] border-0 bg-transparent px-2.5 text-[13px] font-medium tabular-nums text-foreground outline-none'
+
+function HoursRange({ open, close, dayLabel, onOpenChange, onCloseChange }) {
+  return (
+    <div className="inline-flex items-center overflow-hidden rounded-lg border border-input bg-background focus-within:border-[var(--studio-primary)] focus-within:ring-2 focus-within:ring-[var(--studio-primary)]/15">
+      <input
+        type="time"
+        step={1800}
+        value={hourValueToTimeInput(open, 'open')}
+        onChange={(e) => {
+          if (!e.target.value) return
+          onOpenChange(timeInputToHourValue(e.target.value, 'open'))
+        }}
+        aria-label={`${dayLabel} opens`}
+        className={timeInputClass}
+      />
+      <span className="px-0.5 text-[11px] text-muted-foreground select-none">to</span>
+      <input
+        type="time"
+        step={1800}
+        value={hourValueToTimeInput(close, 'close')}
+        onChange={(e) => {
+          if (!e.target.value) return
+          onCloseChange(timeInputToHourValue(e.target.value, 'close'))
+        }}
+        aria-label={`${dayLabel} closes`}
+        className={timeInputClass}
+      />
+    </div>
+  )
+}
 
 const DEFAULT_OPERATING_HOURS = [
   { day: 0, closed: true,  open: 9,  close: 20 },
@@ -33,6 +98,10 @@ const DEFAULT_OPERATING_HOURS = [
   { day: 5, closed: false, open: 9,  close: 20 },
   { day: 6, closed: false, open: 9,  close: 17 },
 ]
+
+function patchDayHours(hours, day, updater) {
+  return (hours || DEFAULT_OPERATING_HOURS).map((d) => (d.day === day ? updater(d) : d))
+}
 
 /** Ensure we always have one entry per weekday (0–6) for the editor. */
 function normalizeOperatingHours(hours) {
@@ -45,8 +114,8 @@ function normalizeOperatingHours(hours) {
     return {
       day: def.day,
       closed: Boolean(h.closed),
-      open: Number.isFinite(Number(h.open)) ? Number(h.open) : def.open,
-      close: Number.isFinite(Number(h.close)) ? Number(h.close) : def.close,
+      open: snapHalfHour(h.open, def.open),
+      close: snapHalfHour(h.close, def.close),
     }
   })
 }
@@ -417,79 +486,82 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Operating Hours (studio local time)</label>
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Days marked closed = no AI lesson bookings (and prefer not to schedule human callbacks then).
-                  The agent still answers texts/calls on those days.
-                </p>
-                <div className="divide-y divide-border rounded-md border border-border overflow-hidden">
-                  {(editingLocation.operatingHours || DEFAULT_OPERATING_HOURS).map((h) => (
-                    <div key={h.day} className="flex items-center gap-3 px-3 py-2 bg-background">
-                      <span className="w-9 text-sm font-medium text-foreground shrink-0">{DAY_LABELS[h.day]}</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditingLocation((p) => ({
-                            ...p,
-                            operatingHours: (p.operatingHours || DEFAULT_OPERATING_HOURS).map((d) =>
-                              d.day === h.day ? { ...d, closed: !d.closed } : d,
-                            ),
-                          }))
-                        }
+                <div className="mb-3">
+                  <p className="text-sm font-medium text-foreground">Operating hours</p>
+                  <p className="mt-0.5 text-[12px] text-muted-foreground">
+                    Studio local time. Closed days are not bookable; the agent still replies.
+                  </p>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-border divide-y divide-border">
+                  {DAY_ORDER.map((day) => {
+                    const h = (editingLocation.operatingHours || DEFAULT_OPERATING_HOURS).find(
+                      (d) => d.day === day,
+                    ) || DEFAULT_OPERATING_HOURS[day]
+                    const dayLabel = DAY_LABELS[day]
+                    return (
+                      <div
+                        key={day}
                         className={[
-                          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors',
-                          h.closed ? 'bg-muted' : 'bg-brand',
+                          'flex items-center gap-4 px-4 py-2.5',
+                          h.closed ? 'bg-muted/25' : 'bg-card',
                         ].join(' ')}
-                        title={h.closed ? 'Closed — click to open' : 'Open — click to close'}
                       >
-                        <span
-                          className={[
-                            'pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow ring-0 transition-transform',
-                            h.closed ? 'translate-x-0' : 'translate-x-4',
-                          ].join(' ')}
-                        />
-                      </button>
-                      {h.closed ? (
-                        <span className="text-xs text-muted-foreground">Closed</span>
-                      ) : (
-                        <div className="flex items-center gap-2 text-sm">
-                          <select
-                            value={h.open ?? 9}
-                            onChange={(e) =>
-                              setEditingLocation((p) => ({
-                                ...p,
-                                operatingHours: (p.operatingHours || DEFAULT_OPERATING_HOURS).map((d) =>
-                                  d.day === h.day ? { ...d, open: Number(e.target.value) } : d,
-                                ),
-                              }))
-                            }
-                            className="rounded border border-input bg-background px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                          >
-                            {HOUR_OPTIONS.filter((o) => o.value < 24).map((o) => (
-                              <option key={o.value} value={o.value}>{o.label}</option>
-                            ))}
-                          </select>
-                          <span className="text-muted-foreground">to</span>
-                          <select
-                            value={h.close ?? 20}
-                            onChange={(e) =>
-                              setEditingLocation((p) => ({
-                                ...p,
-                                operatingHours: (p.operatingHours || DEFAULT_OPERATING_HOURS).map((d) =>
-                                  d.day === h.day ? { ...d, close: Number(e.target.value) } : d,
-                                ),
-                              }))
-                            }
-                            className="rounded border border-input bg-background px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-                          >
-                            {HOUR_OPTIONS.filter((o) => o.value > 0 && o.value > (h.open ?? 9)).map((o) => (
-                              <option key={o.value} value={o.value}>{o.label}</option>
-                            ))}
-                          </select>
+                        <span className="w-[4.75rem] shrink-0 text-[13px] font-medium text-foreground">
+                          {dayLabel}
+                        </span>
+
+                        <div className="min-h-9 min-w-0 flex-1 flex items-center">
+                          {h.closed ? (
+                            <span className="text-[13px] text-muted-foreground">Closed</span>
+                          ) : (
+                            <HoursRange
+                              open={h.open ?? 9}
+                              close={h.close ?? 20}
+                              dayLabel={dayLabel}
+                              onOpenChange={(open) =>
+                                setEditingLocation((p) => ({
+                                  ...p,
+                                  operatingHours: patchDayHours(p.operatingHours, day, (d) => ({
+                                    ...d,
+                                    open,
+                                    close: Number(d.close) <= open
+                                      ? Math.min(24, open + 0.5)
+                                      : d.close,
+                                  })),
+                                }))
+                              }
+                              onCloseChange={(close) =>
+                                setEditingLocation((p) => ({
+                                  ...p,
+                                  operatingHours: patchDayHours(p.operatingHours, day, (d) => ({
+                                    ...d,
+                                    close: Number(close) <= Number(d.open ?? 9)
+                                      ? Math.min(24, Number(d.open ?? 9) + 0.5)
+                                      : close,
+                                  })),
+                                }))
+                              }
+                            />
+                          )}
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        <Switch
+                          checked={!h.closed}
+                          aria-label={`${dayLabel} ${h.closed ? 'closed' : 'open'}`}
+                          onChange={(isOpen) =>
+                            setEditingLocation((p) => ({
+                              ...p,
+                              operatingHours: patchDayHours(p.operatingHours, day, (d) => ({
+                                ...d,
+                                closed: !isOpen,
+                              })),
+                            }))
+                          }
+                        />
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>

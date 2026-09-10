@@ -73,10 +73,11 @@ import { fetchWalletBalance } from "@/lib/wallet";
 import { useToast } from "@/components/ui/toast";
 import { getInitials, formatDate } from "@/lib/utils";
 import {
-  customerLifecycleBadgeClass,
+  customerLifecycleColor,
   customerLifecycleLabel,
   CUSTOMER_LIFECYCLE_STATUS_OPTIONS,
 } from "@/lib/customer-lifecycle";
+import StatusColorBadge from "@/components/shared/StatusColorBadge";
 import { formatReasonLabel } from "@/lib/dynamic-list-normalize";
 import { extractLeadReasonsList } from "@/lib/workflow-normalize";
 
@@ -1222,14 +1223,12 @@ function ProfileTab({ customer, locations, onUpdated }) {
                     <p className="text-[11px] text-muted-foreground mb-0.5">
                       Lifecycle status
                     </p>
-                    <span
-                      className={[
-                        "inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                        customerLifecycleBadgeClass(customer.lifecycleStatus),
-                      ].join(" ")}
+                    <StatusColorBadge
+                      color={customerLifecycleColor(customer.lifecycleStatus)}
+                      className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                     >
                       {customerLifecycleLabel(customer.lifecycleStatus)}
-                    </span>
+                    </StatusColorBadge>
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground mb-0.5">
@@ -8146,14 +8145,12 @@ export default function CustomerDetailPage() {
                 <h1 className="text-xl font-semibold text-foreground truncate">
                   {customer.name}
                 </h1>
-                <span
-                  className={[
-                    "inline-flex flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                    customerLifecycleBadgeClass(customer.lifecycleStatus),
-                  ].join(" ")}
+                <StatusColorBadge
+                  color={customerLifecycleColor(customer.lifecycleStatus)}
+                  className="flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                 >
                   {customerLifecycleLabel(customer.lifecycleStatus)}
-                </span>
+                </StatusColorBadge>
               </div>
               <p className="text-[13px] text-muted-foreground truncate">
                 {customer.email}
