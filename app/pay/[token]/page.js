@@ -10,7 +10,7 @@ import { Check, Lock, Loader2, AlertCircle } from 'lucide-react'
  * This is the only screen in the product a paying customer ever sees, and they see it
  * on a phone, from a text message, deciding in about three seconds whether it is real.
  * So it answers exactly three questions — who is asking, how much, and what for — and
- * says plainly that the card is entered on Clover, not here.
+ * says plainly that the card is entered on the studio's card processor, not here.
  *
  * Colours are fixed rather than themed on purpose. The theme script sets `.dark` from
  * the visitor's OS preference, and a customer has never set a preference in this app, so
@@ -27,6 +27,10 @@ const API_BASE = (
 
 const money = (amount) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(amount) || 0)
+
+// Keys are the values getLocationProvider() returns; it also returns null, which falls
+// through to the unnamed wording below.
+const PROCESSOR_NAMES = { stripe: 'Stripe', clover: 'Clover' }
 
 const CLOSED = {
   paid: {
@@ -336,6 +340,10 @@ export default function PayPage() {
   }
 
   const preferredLabel = formatPreferred(request.preferredSlot, request.timezone)
+  // Named because a stranger trusts "Stripe" more than "our payment provider" — but
+  // only ever the processor they will actually land on. The unnamed fallback covers a
+  // location with no processor resolved, where guessing a brand would be a lie.
+  const processor = PROCESSOR_NAMES[request.provider] || 'our payment provider'
 
   return (
     <Shell>
@@ -391,8 +399,8 @@ export default function PayPage() {
         <p className="mt-4 flex items-start gap-2 text-[12px] leading-relaxed text-muted-foreground">
           <Lock aria-hidden="true" className="mt-px h-3.5 w-3.5 shrink-0" />
           <span>
-            You’ll be taken to Clover to enter your card. {request.studioName} never sees your card
-            details. This link works for 24 hours.
+            You’ll be taken to {processor} to enter your card. {request.studioName} never sees your
+            card details. This link works for 24 hours.
           </span>
         </p>
       </div>
