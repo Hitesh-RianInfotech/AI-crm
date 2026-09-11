@@ -678,6 +678,28 @@ function sanitizeReasonOptions(options = []) {
   return (options || []).filter((o) => !isSelectPlaceholderOption(o))
 }
 
+/**
+ * Align saved/HTML reason options to the current location's lead-reason catalog.
+ * Keeps curated order when values still exist here; otherwise reseeds fully.
+ */
+function alignReasonOptionsToCatalog(savedOptions = [], catalogOptions = []) {
+  const catalog = sanitizeReasonOptions(catalogOptions)
+  if (!catalog.length) return []
+  const byValue = new Map(catalog.map((o) => [String(o.value), o]))
+  const ordered = sanitizeReasonOptions(savedOptions)
+    .map((o) => byValue.get(String(o.value)))
+    .filter(Boolean)
+  if (!ordered.length) return catalog.map((o) => ({ value: o.value, label: o.label }))
+  const used = new Set(ordered.map((o) => String(o.value)))
+  const extras = catalog.filter((o) => !used.has(String(o.value)))
+  return [...ordered, ...extras].map((o) => ({ value: o.value, label: o.label }))
+}
+
+function isSharedFormTemplate(form) {
+  const scope = form?.templateScope
+  return scope === 'organization_default' || scope === 'global'
+}
+
 function getFieldDefaultDisplayLabel(field) {
   const value = field?.defaultValue
   if (value == null || value === '') return ''
@@ -1623,15 +1645,19 @@ function FormsPageInner() {
             String(f.reasonsLocationID) !== String(reasonsLocationID || '')
 
           if (existing.length > 0 && !locationChanged) {
-            const refreshed = sanitizeReasonOptions(existing).map((opt) => ({
-              value: opt.value,
-              label: formatReasonLabel(opt.value || opt.label, leadReasons),
-            }))
+            // Drop reasons that belong to another location's catalog; reseed if none match.
+            const aligned = alignReasonOptionsToCatalog(
+              existing.map((opt) => ({
+                value: opt.value,
+                label: formatReasonLabel(opt.value || opt.label, leadReasons),
+              })),
+              reasonOptions
+            )
             if (
               f.type === 'select' &&
               f.optionsLocked === false &&
               String(f.reasonsLocationID || '') === String(reasonsLocationID || '') &&
-              optsKey(f.options) === optsKey(refreshed)
+              optsKey(f.options) === optsKey(aligned)
             ) {
               return f
             }
@@ -1643,7 +1669,7 @@ function FormsPageInner() {
               optionsLocked: false,
               reasonsLocationID,
               placeholder: f.placeholder?.trim() ? f.placeholder : 'Select Reason',
-              options: refreshed,
+              options: aligned,
             }
           }
 
@@ -1696,6 +1722,16 @@ function FormsPageInner() {
             ) {
               nextDefault = preferredDefault || undefined
             }
+            seeded = true
+          }
+
+          // Shared / unconstrained forms follow the navbar branch when present.
+          if (
+            (!scopeIds.length || formLocationID === ALL_BRANCHES_VALUE) &&
+            preferredDefault &&
+            String(nextDefault || '') !== String(preferredDefault)
+          ) {
+            nextDefault = preferredDefault
             seeded = true
           }
 
@@ -1754,6 +1790,7 @@ function FormsPageInner() {
             locations,
             locked: true,
             required: true,
+            formLocationID,
           })
           studioField.id = 'req-studio'
           const phoneIdx = next.findIndex((f) => f.name === 'phoneNumber')
@@ -2369,9 +2406,34 @@ function FormsPageInner() {
       const detectedType = detectFormTypeFromInferred(inferred)
       setBuilderFormType(detectedType)
 
+      const importReasonsLocationID = resolveReasonsLocationID(locIds)
+      let reasonsForImport = leadReasons
+      try {
+        const reasonsResult = await api.get(leadReasonsUrl(importReasonsLocationID))
+        if (reasonsResult.success) {
+          reasonsForImport = extractLeadReasonsList(reasonsResult)
+          setLeadReasons(reasonsForImport)
+        }
+      } catch (e) {
+        console.error(e)
+      }
+
+      const currentReasonCatalog = buildReasonOptions(reasonsForImport)
+      const currentStudioOptions = buildStudioOptionsForForm(locations, locIds)
+      const sharedTemplate = isSharedFormTemplate(full) || isSharedFormTemplate(form)
+      const branch = getEffectiveBranch()
+      const studioPreferredDefault =
+        resolveFormStudioScopeIds(locIds).length === 1
+          ? resolveFormStudioScopeIds(locIds)[0]
+          : branch && currentStudioOptions.some((o) => String(o.value) === String(branch))
+            ? String(branch)
+            : currentStudioOptions.length === 1
+              ? String(currentStudioOptions[0].value)
+              : undefined
+
       const baseFields =
         detectedType === 'lead'
-          ? buildInitialFormFields('lead', leadReasons, locations)
+          ? buildInitialFormFields('lead', reasonsForImport, locations)
           : [...REQUIRED_SYSTEM_FIELDS]
 
       // Merge imported core fields into base (preserve defaults, hidden, styles, labels)
@@ -2380,19 +2442,39 @@ function FormsPageInner() {
         if (f?.name) inferredByName.set(f.name, f)
       })
 
-      const importReasonsLocationID = resolveReasonsLocationID(locIds)
-
       const mergedBase = baseFields.map((base) => {
         if (!base?.name || !inferredByName.has(base.name)) return base
         const imp = inferredByName.get(base.name)
         inferredByName.delete(base.name)
+
+        let options
+        if (base.name === 'reason') {
+          // Shared / org-default / global templates must show THIS location's reasons,
+          // not the creator location's options baked into htmlCode.
+          options = sharedTemplate
+            ? currentReasonCatalog
+            : alignReasonOptionsToCatalog(imp.options || [], currentReasonCatalog)
+        } else if (base.name === 'locationID' || base.optionsLocked) {
+          options = base.name === 'locationID' ? currentStudioOptions : base.options
+        } else {
+          options = imp.options?.length ? imp.options : base.options
+        }
+
         return {
           ...base,
           type: imp.type === 'phone' || base.name === 'phoneNumber' ? 'phone' : base.type,
           label: imp.label && imp.label.trim() ? imp.label : base.label,
           placeholder: imp.placeholder != null ? imp.placeholder : base.placeholder,
           required: typeof imp.required === 'boolean' ? imp.required : base.required,
-          defaultValue: imp.defaultValue != null && imp.defaultValue !== '' ? imp.defaultValue : base.defaultValue,
+          defaultValue:
+            base.name === 'locationID' && studioPreferredDefault
+              ? studioPreferredDefault
+              : imp.defaultValue != null && imp.defaultValue !== ''
+                ? imp.defaultValue
+                : base.defaultValue,
+          ...(base.name === 'locationID' && studioPreferredDefault
+            ? { studioDefaultSeeded: true }
+            : {}),
           submitHidden: Boolean(imp.submitHidden),
           styles: { ...(base.styles || {}), ...(imp.styles || {}) },
           ...(imp.defaultCountryCode || base.defaultCountryCode
@@ -2401,16 +2483,7 @@ function FormsPageInner() {
           ...(imp.defaultCountryIso || base.defaultCountryIso
             ? { defaultCountryIso: imp.defaultCountryIso || base.defaultCountryIso }
             : {}),
-          options:
-            base.name === 'reason'
-              ? sanitizeReasonOptions(
-                  imp.options?.length ? imp.options : base.options
-                )
-              : base.optionsLocked || base.name === 'locationID'
-                ? base.options
-                : imp.options?.length
-                  ? imp.options
-                  : base.options,
+          options,
           ...(base.name === 'reason' && importReasonsLocationID
             ? { reasonsLocationID: importReasonsLocationID }
             : {}),
