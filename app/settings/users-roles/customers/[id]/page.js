@@ -48,6 +48,8 @@ import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet
 import CustomerMembershipsTab from "@/components/membership/CustomerMembershipsTab";
 import CustomerWalletTab from "@/components/wallet/CustomerWalletTab";
 import CancelRefundDialog from "@/components/shared/CancelRefundDialog";
+import ConfirmStatusOverrideDialog from "@/components/customers/ConfirmStatusOverrideDialog";
+import CustomerStatusHistory from "@/components/customers/CustomerStatusHistory";
 import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import LocationSelector from "@/components/shared/LocationSelector";
 import SendPaymentLinkMenu from "@/components/payments/SendPaymentLinkMenu";
@@ -635,6 +637,11 @@ function ProfileTab({ customer, locations, onUpdated }) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
+  // Holds the refused payload + violations while the admin decides whether to override.
+  const [overridePrompt, setOverridePrompt] = useState(null);
+  // Bumped after a successful save so the history panel refetches — a status change is
+  // exactly when the timeline becomes stale.
+  const [statusHistoryKey, setStatusHistoryKey] = useState(0);
   const [leadReasons, setLeadReasons] = useState([]);
   // Quick-save for just the callback date, without entering full profile
   // edit mode — mirrors saveCallbackDate() in app/leads/components/LeadsDialog.js
@@ -799,14 +806,9 @@ function ProfileTab({ customer, locations, onUpdated }) {
     setEditing(true);
   }
 
-  async function saveProfile(e) {
-    e.preventDefault();
-    if (!form.name.trim() || !form.email.trim()) return;
-    if (!Array.isArray(form.locationID) || form.locationID.length === 0) {
-      toast.error("Please select at least one location.");
-      return;
-    }
-    setSaving(true);
+  // Built once and reused for the override retry, so the second attempt sends exactly
+  // the same payload as the first plus the reason — never a subtly different one.
+  function buildProfilePayload() {
     const addr = {
       street: form.address.street.trim(),
       city: form.address.city.trim(),
@@ -815,7 +817,7 @@ function ProfileTab({ customer, locations, onUpdated }) {
       country: form.address.country.trim() || "USA",
     };
     const hasAddress = addr.street || addr.city || addr.state || addr.zipCode;
-    const res = await api.put(`/api/customer/${customer._id}`, {
+    return {
       name: form.name.trim(),
       email: form.email.trim(),
       phoneNumber: form.phoneNumber.trim() || undefined,
@@ -825,12 +827,49 @@ function ProfileTab({ customer, locations, onUpdated }) {
       callbackDate: form.callbackDate || null,
       lifecycleStatus: form.lifecycleStatus || "active",
       address: hasAddress ? addr : undefined,
-    });
+    };
+  }
+
+  async function submitProfile(payload) {
+    const res = await api.put(`/api/customer/${customer._id}`, payload);
     if (res.success) {
       toast.success("Profile saved.");
       onUpdated();
       setEditing(false);
-    } else toast.error(res.error || "Save failed.");
+      setOverridePrompt(null);
+      setStatusHistoryKey((k) => k + 1);
+      return true;
+    }
+    // A failing entry requirement is not an error to report and forget — the admin may
+    // have a legitimate reason, so offer the override rather than a dead end.
+    if (res.errorData?.code === "STATUS_REQUIREMENTS_NOT_MET") {
+      setOverridePrompt({
+        payload,
+        violations: res.errorData.violations || [],
+        statusLabel: customerLifecycleLabel(payload.lifecycleStatus),
+      });
+      return false;
+    }
+    toast.error(res.error || "Save failed.");
+    return false;
+  }
+
+  async function saveProfile(e) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) return;
+    if (!Array.isArray(form.locationID) || form.locationID.length === 0) {
+      toast.error("Please select at least one location.");
+      return;
+    }
+    setSaving(true);
+    await submitProfile(buildProfilePayload());
+    setSaving(false);
+  }
+
+  async function confirmStatusOverride(reason) {
+    if (!overridePrompt) return;
+    setSaving(true);
+    await submitProfile({ ...overridePrompt.payload, statusOverrideReason: reason });
     setSaving(false);
   }
 
@@ -1298,6 +1337,20 @@ function ProfileTab({ customer, locations, onUpdated }) {
 
               {/* Tags */}
               <TagsEditor customer={customer} onUpdated={onUpdated} />
+
+              <div className="border-t border-border" />
+
+              {/* Why this customer is at this status — the question the lifecycle badge
+                  above provokes, answered in the same card rather than a separate tab. */}
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                  Status History
+                </p>
+                <CustomerStatusHistory
+                  customerID={customer._id}
+                  refreshKey={statusHistoryKey}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -1418,6 +1471,15 @@ function ProfileTab({ customer, locations, onUpdated }) {
         </div>
       </div>
       {/* end inner grid */}
+
+      <ConfirmStatusOverrideDialog
+        open={Boolean(overridePrompt)}
+        onClose={saving ? undefined : () => setOverridePrompt(null)}
+        onConfirm={confirmStatusOverride}
+        statusLabel={overridePrompt?.statusLabel}
+        violations={overridePrompt?.violations || []}
+        busy={saving}
+      />
     </div>
   );
 }

@@ -48,6 +48,7 @@ import api from '@/lib/api'
 import { useToast } from '@/components/ui/toast'
 import LocationSelector from '@/components/shared/LocationSelector'
 import CustomerMigrationImportDialog from '@/components/customers/CustomerMigrationImportDialog'
+import ConfirmStatusOverrideDialog from '@/components/customers/ConfirmStatusOverrideDialog'
 import { getInitials, formatDate, cn } from '@/lib/utils'
 import { isViewingAllBranches, getBranchQueryParam } from '@/lib/branch-filter'
 import { hasPermission } from '@/lib/permissions'
@@ -129,6 +130,8 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  // Holds the refused payload + violations while the admin decides whether to override.
+  const [overridePrompt, setOverridePrompt] = useState(null)
   const toast = useToast()
   const isEdit = Boolean(initial?._id)
 
@@ -210,25 +213,47 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
       lifecycleStatus: form.lifecycleStatus || 'active',
       address: hasAddress ? address : undefined,
     }
+    await submitCustomer(payload)
+    setSaving(false)
+  }
+
+  async function submitCustomer(payload) {
     const result = isEdit
       ? await api.put(`/api/customer/${initial._id}`, payload)
       : await api.post('/api/customer', payload)
 
     if (result.success) {
       toast.success(isEdit ? 'Customer updated.' : 'Customer created.')
+      setOverridePrompt(null)
       onSaved()
       onClose()
-    } else {
-      // Toast, not the inline banner: a server refusal (e.g. a status the customer
-      // does not qualify for) is about the record as a whole, not one field, and the
-      // banner sits below the fold in a long modal where it is easy to miss.
-      toast.error(result.error || 'Something went wrong.')
-      setError(result.error || 'Something went wrong.')
+      return
     }
+    // A failing entry requirement is offered as an override rather than a dead end —
+    // the admin may have a legitimate reason, and it gets recorded either way.
+    if (result.errorData?.code === 'STATUS_REQUIREMENTS_NOT_MET') {
+      setOverridePrompt({
+        payload,
+        violations: result.errorData.violations || [],
+        statusLabel: customerLifecycleLabel(payload.lifecycleStatus),
+      })
+      return
+    }
+    // Toast, not the inline banner: a server refusal is about the record as a whole,
+    // not one field, and the banner sits below the fold in a long modal.
+    toast.error(result.error || 'Something went wrong.')
+    setError(result.error || 'Something went wrong.')
+  }
+
+  async function confirmStatusOverride(reason) {
+    if (!overridePrompt) return
+    setSaving(true)
+    await submitCustomer({ ...overridePrompt.payload, statusOverrideReason: reason })
     setSaving(false)
   }
 
   return (
+    <>
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="2xl">
       <DialogContent onClose={saving ? undefined : onClose} className="max-h-[85vh] flex flex-col p-0 overflow-hidden">
         <DialogHeader className="border-b border-border px-6 py-4">
@@ -404,6 +429,18 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
         </form>
       </DialogContent>
     </Dialog>
+
+    {/* Sibling, not nested inside the form — dialog.js keeps a stack so the topmost
+        one owns Escape and the scroll lock is refcounted. */}
+    <ConfirmStatusOverrideDialog
+      open={Boolean(overridePrompt)}
+      onClose={saving ? undefined : () => setOverridePrompt(null)}
+      onConfirm={confirmStatusOverride}
+      statusLabel={overridePrompt?.statusLabel}
+      violations={overridePrompt?.violations || []}
+      busy={saving}
+    />
+    </>
   )
 }
 
