@@ -91,7 +91,12 @@ export default function CustomerStatusHistory({ customerID, refreshKey = 0 }) {
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <span className={`text-[12px] font-medium ${style.cls}`}>{style.label}</span>
                   <span className="text-[13px] text-foreground">
-                    {customerLifecycleLabel(t.fromStatus) || '—'} → {customerLifecycleLabel(t.toStatus)}
+                    {/* customerLifecycleLabel falls back to "Active" for an empty value,
+                        so a null fromStatus must not be passed through it — that would
+                        claim a prior status the customer never had. */}
+                    {t.fromStatus ? customerLifecycleLabel(t.fromStatus) : '—'}
+                    {' → '}
+                    {customerLifecycleLabel(t.toStatus)}
                   </span>
                   {t.isOverride && (
                     <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
