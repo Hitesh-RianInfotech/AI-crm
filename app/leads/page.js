@@ -29,7 +29,6 @@ import DynamicListMemberSendDialog from '@/components/dynamic-list/DynamicListMe
 import BulkSendActionBar from '@/components/shared/BulkSendActionBar'
 import api from '@/lib/api'
 import { toast } from '@/components/ui/toast'
-import { cn } from '@/lib/utils'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import { RowsPerPage } from '@/components/shared/RowsPerPage'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
@@ -42,10 +41,11 @@ import {
 } from '@/lib/lead-page-filters'
 import { extractFormTemplatesList, extractLeadReasonsList } from '@/lib/workflow-normalize'
 import { normalizeConditionsForForm } from '@/lib/dynamic-list-normalize'
-import { formatLeadStageLabel, getLeadStageBadgeClass } from '@/lib/lead-stages'
+import { formatLeadStageLabel, getLeadStageColor, useLeadStages } from '@/lib/lead-stages'
 import { getCurrentUser } from '@/lib/auth'
 import { hasPermission } from '@/lib/permissions'
 import { isViewingAllBranches, getBranchQueryParam } from '@/lib/branch-filter'
+import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
 const LEAD_CSV_FIELDS = [
   { key: 'name', header: 'name', sample: 'John Doe' },
@@ -80,6 +80,7 @@ function toRecipientLead(lead) {
 export default function LeadsPage() {
   const canWriteLeads = hasPermission('leads', 'manage', 'write')
   const canDeleteLeads = hasPermission('leads', 'manage', 'delete')
+  const { stages: stageOptions } = useLeadStages()
   const [selectedIds, setSelectedIds] = useState([])
   const [selectedLeadsData, setSelectedLeadsData] = useState([])
   const [selectingAll, setSelectingAll] = useState(false)
@@ -595,14 +596,12 @@ export default function LeadsPage() {
                     <div className="text-xs font-normal text-muted-foreground leading-tight">{lead.phoneNumber}</div>
                   </TableCell>
                   <TableCell className="py-3 px-4 whitespace-nowrap">
-                    <span
-                      className={cn(
-                        'inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium',
-                        getLeadStageBadgeClass(stageKey)
-                      )}
+                    <StatusColorBadge
+                      color={getLeadStageColor(stageKey, stageOptions)}
+                      className="px-2.5 py-0.5 text-xs font-medium"
                     >
-                      {formatLeadStageLabel(lead.stage) || 'New'}
-                    </span>
+                      {formatLeadStageLabel(lead.stage, stageOptions) || 'New'}
+                    </StatusColorBadge>
                   </TableCell>
                   <TableCell className="py-3 px-4">
                     <span className="text-sm font-normal text-foreground leading-tight">

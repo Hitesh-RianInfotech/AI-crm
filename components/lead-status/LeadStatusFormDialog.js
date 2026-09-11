@@ -17,6 +17,17 @@ const DEFAULT_COLORS = [
   '#8B5CF6', '#EC4899', '#F97316', '#14B8A6', '#059669',
 ]
 
+/** White on light amber/grey washes out; pick ink vs white from luminance. */
+function contrastTextOnHex(hex) {
+  const raw = String(hex || '').replace('#', '')
+  if (raw.length !== 6) return '#ffffff'
+  const r = parseInt(raw.slice(0, 2), 16)
+  const g = parseInt(raw.slice(2, 4), 16)
+  const b = parseInt(raw.slice(4, 6), 16)
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return '#ffffff'
+  return (r * 299 + g * 587 + b * 114) / 1000 >= 150 ? '#1A1220' : '#ffffff'
+}
+
 const inputClass =
   'w-full rounded-xl border border-border bg-background px-3.5 py-2.5 text-[14px] text-foreground outline-none placeholder:text-muted-foreground focus:border-[var(--studio-primary)] focus:ring-2 focus:ring-[var(--studio-primary)]/15 disabled:opacity-60'
 
@@ -122,8 +133,8 @@ export default function LeadStatusFormDialog({ open, onClose, status, onSaved })
 
             <div className="flex items-center gap-3 pb-0.5">
               <span
-                className="inline-flex max-w-[140px] truncate rounded-full px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm"
-                style={{ background: form.color }}
+                className="inline-flex max-w-[140px] truncate rounded-full px-3 py-1.5 text-[12px] font-semibold shadow-sm"
+                style={{ background: form.color, color: contrastTextOnHex(form.color) }}
               >
                 {form.name.trim() || 'Preview'}
               </span>

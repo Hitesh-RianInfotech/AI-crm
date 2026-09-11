@@ -52,10 +52,11 @@ import { getInitials, formatDate, cn } from '@/lib/utils'
 import { isViewingAllBranches, getBranchQueryParam } from '@/lib/branch-filter'
 import { hasPermission } from '@/lib/permissions'
 import {
-  customerLifecycleBadgeClass,
+  customerLifecycleColor,
   customerLifecycleLabel,
   CUSTOMER_LIFECYCLE_STATUS_OPTIONS,
 } from '@/lib/customer-lifecycle'
+import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
 const CUSTOMER_CSV_FIELDS = [
   { key: 'name', header: 'name', sample: 'Jane Smith' },
@@ -998,14 +999,12 @@ export default function CustomersPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span
-                        className={cn(
-                          'inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
-                          customerLifecycleBadgeClass(customer.lifecycleStatus)
-                        )}
+                      <StatusColorBadge
+                        color={customerLifecycleColor(customer.lifecycleStatus)}
+                        className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                       >
                         {customerLifecycleLabel(customer.lifecycleStatus)}
-                      </span>
+                      </StatusColorBadge>
                     </TableCell>
                     <TableCell className="text-[12px] text-foreground">
                       {customer.reason ? formatReasonLabel(customer.reason, leadReasons) : '—'}
