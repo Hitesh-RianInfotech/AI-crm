@@ -534,7 +534,7 @@ export function SavedTemplatesTab() {
   )
 }
 
-/* ─────────────────────────── Create Event & Purchase ─────────────────────────── */
+/* ────────────────────────── Create Events & Products ────────────────────────── */
 
 export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
   const [step, setStep] = useState(1)
@@ -670,7 +670,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
       const purchase = res.data
 
       if (payable <= 0) {
-        toast.success('Event & purchase created')
+        toast.success('Events & products created')
       } else if (billingType === 'one_time') {
         if (collectNow && !walletOver) {
           const tip = tipEnabled && tipTeacherID && Number(tipAmount) > 0
@@ -684,9 +684,9 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
           })
           if (!payRes.success) toast.error('Purchase saved, but payment failed', { description: payRes.error })
           else if (payRes.data?.checkoutUrl) { window.open(payRes.data.checkoutUrl, '_blank', 'noopener'); toast.success('Card checkout opened in a new tab') }
-          else toast.success('Event & purchase created and paid')
+          else toast.success('Events & products created and paid')
         } else {
-          toast.success('Event & purchase created')
+          toast.success('Events & products created')
         }
       } else {
         // payment_plan or flexible → build a payment plan
@@ -717,7 +717,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
     <Sheet open={open} onClose={onClose} width="640px">
       <SheetContent onClose={onClose} className="p-0">
         <div className="shrink-0 border-b border-border px-6 pt-6 pb-4">
-          <h2 className="text-lg font-semibold tracking-tight">Create Event &amp; Purchase</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Create Events &amp; Products</h2>
           <p className="text-sm text-muted-foreground mt-1">Sell an event, product, or custom charge.</p>
           <div className="flex items-center gap-2 pt-3">
             {[{ n: 1, label: 'Details & billing' }, { n: 2, label: 'Payment' }].map((s, i) => (
@@ -863,7 +863,7 @@ export function CreateEventPurchaseDialog({ open, onClose, onCreated }) {
                     Collect the full balance now
                   </label>
                   {!collectNow ? (
-                    <p className="text-xs text-muted-foreground">Recorded as unpaid — collect later from the customer’s Events &amp; Purchases tab.</p>
+                    <p className="text-xs text-muted-foreground">Recorded as unpaid — collect later from the customer’s Events &amp; Products tab.</p>
                   ) : (
                     <>
                       <div className="rounded-xl border border-border p-4 flex flex-col gap-3">

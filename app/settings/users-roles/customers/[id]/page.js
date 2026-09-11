@@ -327,7 +327,7 @@ const TABS = [
   },
   { id: "memberships", label: "Memberships", Icon: CreditCard },
   { id: "wallet", label: "Wallet", Icon: Wallet },
-  { id: "purchases", label: "Events & Purchases", Icon: Receipt },
+  { id: "purchases", label: "Events & Products", Icon: Receipt },
   { id: "payments", label: "Payment History", Icon: Receipt },
   { id: "lessons", label: "Lessons", Icon: BookOpen },
   { id: "history", label: "History", Icon: History },
@@ -6235,7 +6235,7 @@ function PurchasesTab({ customerID }) {
 
       {rows.length === 0 ? (
         <div className="rounded-xl border border-border bg-card py-16 text-center text-[13px] text-muted-foreground">
-          No events or purchases yet. Create one from Setup → “Create Event &amp; Purchase”.
+          No events or products yet. Create one from Setup → “Create Events &amp; Products”.
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card overflow-x-auto">
@@ -6417,7 +6417,7 @@ function PurchasesTab({ customerID }) {
         </div>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Card &amp; wallet payments: use “Create Event &amp; Purchase”, or record them from Payment History.
+        Card &amp; wallet payments: use “Create Events &amp; Products”, or record them from Payment History.
       </p>
     </div>
   );

@@ -612,7 +612,7 @@ export default function Header({
                           </p>
                           <EnrollMenuItem
                             icon={Ticket}
-                            label="Event & Purchase"
+                            label="Events & Products"
                             description="Tickets, recitals, and one-time items"
                             onClick={() => {
                               setPurchaseOpen(true);
