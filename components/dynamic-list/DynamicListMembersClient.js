@@ -38,11 +38,8 @@ import DynamicListMemberSendDialog from '@/components/dynamic-list/DynamicListMe
 import DynamicListMembersFilterPanel from '@/components/dynamic-list/DynamicListMembersFilterPanel'
 import DynamicListMembersQuickBar from '@/components/dynamic-list/DynamicListMembersQuickBar'
 import MemberLeadViewDialog from '@/components/dynamic-list/MemberLeadViewDialog'
-import { formatLeadStageLabel, getLeadStageBadgeClass } from '@/lib/lead-stages'
-
-function stageBadgeClass(stage) {
-  return getLeadStageBadgeClass(stage)
-}
+import { formatLeadStageLabel, getLeadStageColor, useLeadStages } from '@/lib/lead-stages'
+import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
 function leadAvatarClass(name = '') {
   const palette = [
@@ -76,6 +73,7 @@ function resolveLeadLocation(lead, locations = []) {
 }
 
 export default function DynamicListMembersClient({ listId, listPathBase = '/ai-automation/dynamic-lists' }) {
+  const { stages: stageOptions } = useLeadStages()
   const [list, setList] = useState(null)
   const [leadReasons, setLeadReasons] = useState([])
   const [locations, setLocations] = useState([])
@@ -528,14 +526,12 @@ export default function DynamicListMembersClient({ listId, listPathBase = '/ai-a
                         <td className="px-4 py-4 text-muted-foreground">{lead?.email || '—'}</td>
                         <td className="px-4 py-4 text-muted-foreground">{lead?.phoneNumber || '—'}</td>
                         <td className="px-4 py-4">
-                          <span
-                            className={cn(
-                              'inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold',
-                              stageBadgeClass(lead?.stage)
-                            )}
+                          <StatusColorBadge
+                            color={getLeadStageColor(lead?.stage, stageOptions)}
+                            className="px-2.5 py-1 text-[11px] font-semibold"
                           >
-                            {lead?.stage ? formatLeadStageLabel(lead.stage) : '—'}
-                          </span>
+                            {lead?.stage ? formatLeadStageLabel(lead.stage, stageOptions) : '—'}
+                          </StatusColorBadge>
                         </td>
                         <td className="px-4 py-4">
                           {lead?.uploadType ? (
