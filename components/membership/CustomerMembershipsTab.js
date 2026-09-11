@@ -13,7 +13,7 @@ import CancelRefundDialog from '@/components/shared/CancelRefundDialog'
 import FreezeMembershipDialog from '@/components/shared/FreezeMembershipDialog'
 import AssignMembershipForm from './AssignMembershipForm'
 import SendPaymentLinkMenu from '@/components/payments/SendPaymentLinkMenu'
-import { useCloverConnection } from '@/app/settings/payments/clover/useCloverConnection'
+import { useCardProcessor } from '@/app/settings/payments/useCardProcessor'
 import { openCheckoutTab, navigateCheckoutTab, closeCheckoutTab, CHECKOUT_TOAST } from '@/lib/clover'
 import { PAYMENT_METHODS } from '@/lib/paymentMethods'
 import WalletShortfallField, { walletPaymentFields } from '@/components/payments/WalletShortfallField'
@@ -45,7 +45,7 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
   const [walletBalance, setWalletBalance] = useState(0)
   const [paymentDate, setPaymentDate] = useState(todayDateInput)
   const [paying, setPaying] = useState(false)
-  const { cloverReady } = useCloverConnection(locationID || target?.plan)
+  const { ready: cloverReady } = useCardProcessor(locationID || target?.plan)
 
   const customerID = target?.plan?.customerID
   useEffect(() => {
@@ -125,12 +125,12 @@ function PayInstallmentDialog({ target, onClose, onPaid, locationID }) {
           onShortfallMethodChange={setShortfallMethod}
         />
         {cloverNotConnected && (
-          <p className="mt-2 text-[11px] text-warning">Finish Clover setup in Settings → Integrations to charge a card.</p>
+          <p className="mt-2 text-[11px] text-warning">Connect a card processor (Clover or Stripe) in Settings → Integrations to charge a card.</p>
         )}
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={paying}>Cancel</Button>
           <Button size="sm" onClick={handlePay} disabled={paying || cloverNotConnected} className="bg-success hover:bg-success text-white">
-            {paying ? 'Saving…' : payWithClover ? 'Pay with Clover' : `Pay $${Number(inst.amount).toFixed(2)}`}
+            {paying ? 'Saving…' : payWithClover ? 'Pay by card' : `Pay $${Number(inst.amount).toFixed(2)}`}
           </Button>
         </div>
       </div>
@@ -153,7 +153,7 @@ export default function CustomerMembershipsTab({ customerID, locationID }) {
   const [freezing, setFreezing] = useState(false)
   const [calendarEvents, setCalendarEvents] = useState([])
   const [expandedServices, setExpandedServices] = useState(new Set())
-  const { cloverReady } = useCloverConnection(locationID)
+  const { ready: cloverReady } = useCardProcessor(locationID)
 
   function toggleService(key) {
     setExpandedServices((prev) => {

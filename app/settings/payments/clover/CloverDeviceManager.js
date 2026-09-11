@@ -14,8 +14,9 @@ import { useCloverDevices, listAvailableDevices, pairDevice, unpairDevice } from
  * picker from CloverConnectionCard above it — mirrors that component's pattern
  * rather than sharing state, so this card works standalone if it's ever moved.
  */
-export default function CloverDeviceManager() {
-  const [locationID, setLocationID] = useState(null)
+export default function CloverDeviceManager({ locationID: fixedLocationID = null }) {
+  const [ownLocationID, setOwnLocationID] = useState(null)
+  const locationID = fixedLocationID ?? ownLocationID
   const { status: connectionStatus } = useCloverConnection(locationID)
   const { devices, loading, refresh } = useCloverDevices(locationID)
   const [available, setAvailable] = useState(null) // null = not fetched yet
@@ -79,16 +80,18 @@ export default function CloverDeviceManager() {
         </p>
       </div>
 
-      <div className="mt-4 max-w-sm">
-        <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
-        <LocationSelector
-          value={locationID}
-          onChange={setLocationID}
-          multiple={false}
-          showAllOption={false}
-          placeholder="Select location to configure…"
-        />
-      </div>
+      {!fixedLocationID && (
+        <div className="mt-4 max-w-sm">
+          <label className="mb-1.5 block text-sm font-medium text-foreground">Location *</label>
+          <LocationSelector
+            value={locationID}
+            onChange={setOwnLocationID}
+            multiple={false}
+            showAllOption={false}
+            placeholder="Select location to configure…"
+          />
+        </div>
+      )}
 
       {!locationID && (
         <p className="mt-4 text-sm text-muted-foreground">Select a location to manage its terminals.</p>

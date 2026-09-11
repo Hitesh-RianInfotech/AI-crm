@@ -1124,7 +1124,7 @@ function ToDosTab() {
 
 const GROUPS = [
   { id: 'scheduled', label: 'Scheduled Offerings', tabs: SCHEDULED_TABS },
-  { id: 'events', label: 'Events & Purchases', tabs: EVENTS_TABS },
+  { id: 'events', label: 'Events & Products', tabs: EVENTS_TABS },
 ]
 
 function PillTabs({ tabs, activeTab, onSelect }) {
@@ -1199,7 +1199,7 @@ function SetupContent() {
           onClick={() => setPurchaseOpen(true)}
         >
           <Plus className="h-4 w-4" />
-          Create Event &amp; Purchase
+          Create Events &amp; Products
         </Button>
       </div>
 
