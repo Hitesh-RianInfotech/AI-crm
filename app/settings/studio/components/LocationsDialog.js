@@ -165,6 +165,7 @@ const emptyLocation = () => ({
   timezone: DEFAULT_LOCATION_TIMEZONE,
   emailConversationEnabled: false,
   defaultLessonMinutes: 60,
+  admin: '',
   operatingHours: [...DEFAULT_OPERATING_HOURS],
 })
 
@@ -238,6 +239,7 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
         timezone: editingLocation.timezone || DEFAULT_LOCATION_TIMEZONE,
         emailConversationEnabled: Boolean(editingLocation.emailConversationEnabled),
         defaultLessonMinutes: Number(editingLocation.defaultLessonMinutes) || 60,
+        admin: String(editingLocation.admin || '').trim() || null,
         operatingHours: normalizeOperatingHours(editingLocation.operatingHours),
       }
 
@@ -329,6 +331,18 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
                   />
                   <p className="mt-1 text-xs text-muted-foreground">
                     Used as the outbound From address for this studio (must be allowed on your SendGrid domain).
+                  </p>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-foreground mb-1.5">Admin name</label>
+                  <Input
+                    value={editingLocation.admin || ''}
+                    onChange={(e) => setEditingLocation((p) => ({ ...p, admin: e.target.value }))}
+                    placeholder="e.g., Jane Smith"
+                  />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Used in email/SMS templates as {'{{admin_name}}'}, {'{{admin_first_name}}'}, and{' '}
+                    {'{{admin_last_name}}'}.
                   </p>
                 </div>
               </div>
