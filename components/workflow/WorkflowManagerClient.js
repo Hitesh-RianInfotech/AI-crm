@@ -1,6 +1,6 @@
 'use client'
 
-import { Plus, Workflow } from 'lucide-react'
+import { Plus, Sparkles, Workflow } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useState } from 'react'
 import api from '@/lib/api'
@@ -13,6 +13,7 @@ import GlobalLoader from '@/components/shared/GlobalLoader'
 import WorkflowCard from '@/components/workflow/WorkflowCard'
 import ConfirmDeleteWorkflowDialog from '@/components/workflow/ConfirmDeleteWorkflowDialog'
 import SetWorkflowScopeDialog from '@/components/workflow/SetWorkflowScopeDialog'
+import CreateWorkflowWithAISheet from '@/components/workflow/CreateWorkflowWithAISheet'
 import { buildDuplicateWorkflowPayload } from '@/lib/workflow-normalize'
 
 function parseWorkflowListResponse(data) {
@@ -78,6 +79,7 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [duplicatingId, setDuplicatingId] = useState(null)
+  const [aiBuilderOpen, setAiBuilderOpen] = useState(false)
   const [actionId, setActionId] = useState(null)
 
   const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
@@ -351,12 +353,18 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
 
   return (
     <div className="flex min-h-full flex-col space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-slate-600">Browse and manage your workflows</p>
-        <Button variant="gradient" onClick={() => router.push(builderHref)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Create New Workflow
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="outline" onClick={() => setAiBuilderOpen(true)}>
+            <Sparkles className="mr-2 h-4 w-4" />
+            Create with AI
+          </Button>
+          <Button variant="gradient" onClick={() => router.push(builderHref)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create New Workflow
+          </Button>
+        </div>
       </div>
 
       <SearchInput
@@ -407,7 +415,11 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
             <p className="mt-1 text-sm text-muted-foreground">
               Create a blank automation or enable a template to get started.
             </p>
-            <div className="mt-4 flex justify-center">
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button variant="outline" onClick={() => setAiBuilderOpen(true)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Create with AI
+              </Button>
               <Button variant="gradient" onClick={() => router.push(builderHref)}>
                 <Plus className="mr-2 h-4 w-4" />
                 Create New Workflow
@@ -482,6 +494,18 @@ export default function WorkflowManagerClient({ detailPathBase = '/ai-automation
           setScopeTarget(null)
         }}
         onConfirm={confirmScope}
+      />
+
+      <CreateWorkflowWithAISheet
+        open={aiBuilderOpen}
+        onClose={() => setAiBuilderOpen(false)}
+        onCreated={(id) => {
+          if (id) {
+            router.push(`${builderHref}?id=${id}`)
+            return
+          }
+          loadWorkflows()
+        }}
       />
     </div>
   )
