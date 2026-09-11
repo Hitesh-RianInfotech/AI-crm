@@ -28,63 +28,86 @@ function snapHalfHour(n, fallback) {
   return Math.round(v * 2) / 2
 }
 
-/** Decimal hours (8.5) → `HH:MM` for a native time input. Close at 24 → 00:00. */
-function hourValueToTimeInput(hourValue, role) {
-  const v = Number(hourValue)
-  if (role === 'close' && v === 24) return '00:00'
-  const totalMin = Math.round((Number.isFinite(v) ? v : 0) * 60)
-  const h24 = Math.floor(totalMin / 60) % 24
-  const mins = totalMin % 60 >= 30 ? 30 : 0
-  return `${String(h24).padStart(2, '0')}:${String(mins).padStart(2, '0')}`
+/** Decimal hours (8.5) → 12-hour parts. Close at 24 → 12:00 AM. */
+function decimalToClock(hourValue, role) {
+  let v = Number(hourValue)
+  if (!Number.isFinite(v)) v = role === 'close' ? 20 : 9
+  v = Math.round(v * 2) / 2
+  if (role === 'close' && (v === 24 || v === 0)) {
+    return { hour: 12, minute: 0, period: 'AM' }
+  }
+  v = role === 'open' ? Math.max(0, Math.min(23.5, v)) : Math.max(0.5, Math.min(24, v))
+  const h24 = Math.floor(v)
+  const minute = v % 1 >= 0.5 ? 30 : 0
+  if (h24 === 0) return { hour: 12, minute, period: 'AM' }
+  if (h24 === 12) return { hour: 12, minute, period: 'PM' }
+  if (h24 > 12) return { hour: h24 - 12, minute, period: 'PM' }
+  return { hour: h24, minute, period: 'AM' }
 }
 
-/** Native `HH:MM` → decimal hours, snapped to :00 / :30. Close 00:00 → 24. */
-function timeInputToHourValue(hhmm, role) {
-  const match = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''))
-  if (!match) return role === 'close' ? 20 : 9
-  let hour = Number(match[1])
-  let minute = Number(match[2])
-  minute = minute >= 45 ? 60 : minute >= 15 ? 30 : 0
-  if (minute === 60) {
-    hour += 1
-    minute = 0
-  }
-  hour = Math.max(0, Math.min(24, hour))
-  const value = hour + (minute === 30 ? 0.5 : 0)
-  if (role === 'close' && (value === 0 || hour >= 24)) return 24
+/** 12-hour parts → decimal hours. Close 12:00 AM → 24. */
+function clockToDecimal({ hour, minute, period }, role) {
+  const h12 = Number(hour)
+  const m = Number(minute) >= 30 ? 30 : 0
+  const h24 = period === 'PM' ? (h12 === 12 ? 12 : h12 + 12) : h12 === 12 ? 0 : h12
+  const value = h24 + (m === 30 ? 0.5 : 0)
+  if (role === 'close' && value === 0) return 24
   if (role === 'open') return Math.min(23.5, value)
   return Math.min(24, Math.max(0.5, value))
 }
 
-const timeInputClass =
-  'h-9 w-[7.75rem] border-0 bg-transparent px-2.5 text-[13px] font-medium tabular-nums text-foreground outline-none'
+const clockSelectClass =
+  'h-8 min-w-0 cursor-pointer appearance-none rounded border-0 bg-transparent px-0 py-0 text-center text-[13px] font-medium leading-none tabular-nums text-foreground outline-none hover:bg-muted/70 focus:bg-muted/70 focus:ring-0 [text-align-last:center]'
+
+function ClockField({ value, role, dayLabel, which, onChange }) {
+  const parts = decimalToClock(value, role)
+  const commit = (patch) => onChange(clockToDecimal({ ...parts, ...patch }, role))
+
+  return (
+    <div className="inline-flex items-center">
+      <select
+        value={parts.hour}
+        onChange={(e) => commit({ hour: Number(e.target.value) })}
+        aria-label={`${dayLabel} ${which} hour`}
+        className={`${clockSelectClass} w-6`}
+      >
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
+          <option key={h} value={h}>
+            {h}
+          </option>
+        ))}
+      </select>
+      <span className="w-2 shrink-0 text-center text-[13px] font-medium text-muted-foreground" aria-hidden>
+        :
+      </span>
+      <select
+        value={parts.minute}
+        onChange={(e) => commit({ minute: Number(e.target.value) })}
+        aria-label={`${dayLabel} ${which} minutes`}
+        className={`${clockSelectClass} w-7`}
+      >
+        <option value={0}>00</option>
+        <option value={30}>30</option>
+      </select>
+      <select
+        value={parts.period}
+        onChange={(e) => commit({ period: e.target.value })}
+        aria-label={`${dayLabel} ${which} AM or PM`}
+        className={`${clockSelectClass} w-8`}
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  )
+}
 
 function HoursRange({ open, close, dayLabel, onOpenChange, onCloseChange }) {
   return (
-    <div className="inline-flex items-center overflow-hidden rounded-lg border border-input bg-background focus-within:border-[var(--studio-primary)] focus-within:ring-2 focus-within:ring-[var(--studio-primary)]/15">
-      <input
-        type="time"
-        step={1800}
-        value={hourValueToTimeInput(open, 'open')}
-        onChange={(e) => {
-          if (!e.target.value) return
-          onOpenChange(timeInputToHourValue(e.target.value, 'open'))
-        }}
-        aria-label={`${dayLabel} opens`}
-        className={timeInputClass}
-      />
-      <span className="px-0.5 text-[11px] text-muted-foreground select-none">to</span>
-      <input
-        type="time"
-        step={1800}
-        value={hourValueToTimeInput(close, 'close')}
-        onChange={(e) => {
-          if (!e.target.value) return
-          onCloseChange(timeInputToHourValue(e.target.value, 'close'))
-        }}
-        aria-label={`${dayLabel} closes`}
-        className={timeInputClass}
-      />
+    <div className="inline-flex h-9 shrink-0 items-center rounded-lg border border-input bg-background px-1.5 focus-within:border-[var(--studio-primary)] focus-within:ring-2 focus-within:ring-[var(--studio-primary)]/15">
+      <ClockField value={open} role="open" dayLabel={dayLabel} which="opens" onChange={onOpenChange} />
+      <span className="px-1.5 text-[11px] text-muted-foreground select-none">to</span>
+      <ClockField value={close} role="close" dayLabel={dayLabel} which="closes" onChange={onCloseChange} />
     </div>
   )
 }
@@ -493,7 +516,7 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
                   </p>
                 </div>
 
-                <div className="overflow-hidden rounded-xl border border-border divide-y divide-border">
+                <div className="overflow-visible rounded-xl border border-border divide-y divide-border">
                   {DAY_ORDER.map((day) => {
                     const h = (editingLocation.operatingHours || DEFAULT_OPERATING_HOURS).find(
                       (d) => d.day === day,
@@ -503,7 +526,7 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
                       <div
                         key={day}
                         className={[
-                          'flex items-center gap-4 px-4 py-2.5',
+                          'flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 first:rounded-t-xl last:rounded-b-xl',
                           h.closed ? 'bg-muted/25' : 'bg-card',
                         ].join(' ')}
                       >
@@ -511,7 +534,7 @@ export default function LocationsDialog({ open, onClose, locations = [], onRefre
                           {dayLabel}
                         </span>
 
-                        <div className="min-h-9 min-w-0 flex-1 flex items-center">
+                        <div className="min-h-9 flex-1 flex items-center overflow-visible">
                           {h.closed ? (
                             <span className="text-[13px] text-muted-foreground">Closed</span>
                           ) : (

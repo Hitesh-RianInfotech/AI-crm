@@ -219,6 +219,10 @@ function CustomerFormDialog({ open, onClose, onSaved, initial }) {
       onSaved()
       onClose()
     } else {
+      // Toast, not the inline banner: a server refusal (e.g. a status the customer
+      // does not qualify for) is about the record as a whole, not one field, and the
+      // banner sits below the fold in a long modal where it is easy to miss.
+      toast.error(result.error || 'Something went wrong.')
       setError(result.error || 'Something went wrong.')
     }
     setSaving(false)

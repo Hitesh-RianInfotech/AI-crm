@@ -457,6 +457,9 @@ export default function AiAssistTab() {
         endCallMessage: String(endCallMessage || ''),
         firstMessageMode: String(firstMessageMode || ''),
         fileID: String(selectedKnowledgeFile?.fileID || selectedKnowledgeFileId || ''),
+        fileIDies: selectedKnowledgeFile?.fileID || selectedKnowledgeFileId
+          ? [String(selectedKnowledgeFile?.fileID || selectedKnowledgeFileId)]
+          : [],
         firstMessage:
           firstMessageMode === 'assistant-speaks-first-with-model-generated-message'
             ? ''
