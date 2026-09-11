@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -52,6 +52,7 @@ import LoadingSpinner from "@/components/shared/LoadingSpinner";
 import LocationSelector from "@/components/shared/LocationSelector";
 import SendPaymentLinkMenu from "@/components/payments/SendPaymentLinkMenu";
 import api from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import {
   useCloverConnection,
   resolveLocationID,
@@ -63,6 +64,7 @@ import {
   CHECKOUT_TOAST,
 } from "@/lib/clover";
 import { PAYMENT_METHODS } from "@/lib/paymentMethods";
+import { dateInputToISO, todayDateInput } from "@/lib/studioLocalDate";
 import WalletShortfallField, {
   walletPaymentFields,
 } from "@/components/payments/WalletShortfallField";
@@ -71,10 +73,11 @@ import { fetchWalletBalance } from "@/lib/wallet";
 import { useToast } from "@/components/ui/toast";
 import { getInitials, formatDate } from "@/lib/utils";
 import {
-  customerLifecycleBadgeClass,
+  customerLifecycleColor,
   customerLifecycleLabel,
   CUSTOMER_LIFECYCLE_STATUS_OPTIONS,
 } from "@/lib/customer-lifecycle";
+import StatusColorBadge from "@/components/shared/StatusColorBadge";
 import { formatReasonLabel } from "@/lib/dynamic-list-normalize";
 import { extractLeadReasonsList } from "@/lib/workflow-normalize";
 
@@ -326,6 +329,7 @@ const TABS = [
   },
   { id: "memberships", label: "Memberships", Icon: CreditCard },
   { id: "wallet", label: "Wallet", Icon: Wallet },
+  { id: "purchases", label: "Events & Purchases", Icon: Receipt },
   { id: "payments", label: "Payment History", Icon: Receipt },
   { id: "lessons", label: "Lessons", Icon: BookOpen },
   { id: "history", label: "History", Icon: History },
@@ -1219,14 +1223,12 @@ function ProfileTab({ customer, locations, onUpdated }) {
                     <p className="text-[11px] text-muted-foreground mb-0.5">
                       Lifecycle status
                     </p>
-                    <span
-                      className={[
-                        "inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                        customerLifecycleBadgeClass(customer.lifecycleStatus),
-                      ].join(" ")}
+                    <StatusColorBadge
+                      color={customerLifecycleColor(customer.lifecycleStatus)}
+                      className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                     >
                       {customerLifecycleLabel(customer.lifecycleStatus)}
-                    </span>
+                    </StatusColorBadge>
                   </div>
                   <div>
                     <p className="text-[11px] text-muted-foreground mb-0.5">
@@ -1789,9 +1791,7 @@ function PayInstallmentDialog({
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [amount, setAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
-  );
+  const [paymentDate, setPaymentDate] = useState(todayDateInput);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   const { cloverReady } = useCloverConnection(locationID || plan);
@@ -1841,7 +1841,7 @@ function PayInstallmentDialog({
       {
         installmentIndex,
         amount: num,
-        paymentDate: paymentDate || undefined,
+        paymentDate: dateInputToISO(paymentDate),
         ...walletPaymentFields({
           method,
           shortfallMethod,
@@ -2196,7 +2196,7 @@ function SetupPaymentPlanDialog({
     if (open) {
       setNumberOfInstallments(3);
       setFrequency("monthly");
-      setStartDate(new Date().toISOString().slice(0, 10));
+      setStartDate(todayDateInput());
       setCollectNow(false);
       setMethod("cash");
     }
@@ -3753,6 +3753,10 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
   const [extendTarget, setExtendTarget] = useState(null);
   const [extendDate, setExtendDate] = useState("");
   const [extending, setExtending] = useState(false);
+  // Services sold on their own are given a fixed one-year validity at purchase
+  // (see SERVICE_ONLY_EXPIRY_DAYS) — this is the only place it can be changed,
+  // and only by roles that can write enrollments. Super admin passes through.
+  const canEditValidity = hasPermission("calendar", "enrollment", "write");
   const [payInstallTarget, setPayInstallTarget] = useState(null);
   const [changeInstallDateTarget, setChangeInstallDateTarget] = useState(null);
   const [addInstallTarget, setAddInstallTarget] = useState(null);
@@ -4143,11 +4147,11 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
       { expiryDate: extendDate },
     );
     if (res.success) {
-      toast.success("Expiry date extended.");
+      toast.success("Validity updated.");
       setExtendTarget(null);
       setExtendDate("");
       load();
-    } else toast.error(res.error || "Failed to extend expiry.");
+    } else toast.error(res.error || "Failed to update validity.");
     setExtending(false);
   }
 
@@ -4364,26 +4368,30 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
                         >
                           {cp.status}
                         </span>
-                        {cp.status !== "cancelled" && cp.expiryDate && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2.5 text-[11px] font-medium"
-                            onClick={() => {
-                              setExtendDate(
-                                new Date(cp.expiryDate)
-                                  .toISOString()
-                                  .slice(0, 10),
-                              );
-                              setExtendTarget({
-                                _id: enr._id,
-                                packageName: cp.packageName,
-                              });
-                            }}
-                          >
-                            Extend
-                          </Button>
-                        )}
+                        {canEditValidity &&
+                          cp.status !== "cancelled" &&
+                          cp.expiryDate && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2.5 text-[11px] font-medium"
+                              onClick={() => {
+                                setExtendDate(
+                                  new Date(cp.expiryDate)
+                                    .toISOString()
+                                    .slice(0, 10),
+                                );
+                                setExtendTarget({
+                                  _id: enr._id,
+                                  packageName:
+                                    enrollmentDisplayName(enr) ||
+                                    cp.packageName,
+                                });
+                              }}
+                            >
+                              Change validity
+                            </Button>
+                          )}
                         {cp.status === "active" && (
                           <Button
                             variant="outline"
@@ -5047,7 +5055,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
         onSuccess={load}
       />
 
-      {/* Extend expiry */}
+      {/* Change validity (expiry date) */}
       <Dialog
         open={Boolean(extendTarget)}
         onOpenChange={(v) => {
@@ -5059,14 +5067,14 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Extend Package Expiry</DialogTitle>
+            <DialogTitle>Change Validity</DialogTitle>
           </DialogHeader>
           <p className="text-[13px] text-muted-foreground mt-1">
             Set a new expiry date for{" "}
             <span className="font-semibold text-foreground">
               {extendTarget?.packageName}
             </span>
-            . If the new date is in the future the package will be reactivated.
+            . If the new date is in the future it will be reactivated.
           </p>
           <div className="mt-4">
             <label className="text-[12px] font-medium text-foreground block mb-1">
@@ -5095,7 +5103,7 @@ function EnrollmentsTab({ customerID, customerName = "", locationID }) {
               disabled={extending || !extendDate}
               onClick={handleEnrExtend}
             >
-              {extending ? "Saving…" : "Extend Expiry"}
+              {extending ? "Saving…" : "Save Validity"}
             </Button>
           </div>
         </DialogContent>
@@ -5827,9 +5835,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
   const [mode, setMode] = useState(null); // "pay" | "change-date"
   const [amount, setAmount] = useState(String(outstanding.toFixed(2)));
   const [method, setMethod] = useState("cash");
-  const [paymentDate, setPaymentDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [paymentDate, setPaymentDate] = useState(todayDateInput);
   const [shortfallMethod, setShortfallMethod] = useState("cash");
   const [walletBalance, setWalletBalance] = useState(0);
   const [deviceID, setDeviceID] = useState("");
@@ -5876,7 +5882,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
         amountDue: num,
       }),
       ...(payWithTerminal ? { deviceID } : {}),
-      ...(paymentDate ? { paymentDate } : {}),
+      ...(paymentDate ? { paymentDate: dateInputToISO(paymentDate) } : {}),
     });
     if (res.success) {
       if (res.data?.checkoutUrl) {
@@ -6036,7 +6042,7 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
             <input
               type="date"
               value={paymentDate}
-              max={new Date().toISOString().slice(0, 10)}
+              max={todayDateInput()}
               onChange={(e) => setPaymentDate(e.target.value)}
               className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-[12px] outline-none focus:border-primary"
             />
@@ -6128,6 +6134,293 @@ function FlexiblePaymentDueCard({ enr, customerID, locationID, onSuccess }) {
           </div>
         </form>
       )}
+    </div>
+  );
+}
+
+function PurchasesTab({ customerID }) {
+  const [rows, setRows] = useState([]);
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const toast = useToast();
+
+  const [plans, setPlans] = useState([]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [pRes, payRes, planRes] = await Promise.all([
+      api.get(`/api/purchase?customerID=${customerID}&limit=100`),
+      api.get(`/api/payment/customer/${customerID}?limit=200`),
+      api.get(`/api/payment-plan/customer/${customerID}`),
+    ]);
+    if (pRes.success) setRows(Array.isArray(pRes.data) ? pRes.data : []);
+    if (payRes.success) setPayments(Array.isArray(payRes.data) ? payRes.data : []);
+    if (planRes.success) setPlans(Array.isArray(planRes.data) ? planRes.data : []);
+    setLoading(false);
+  }, [customerID]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const paymentsFor = (purchaseID) =>
+    payments.filter((p) => String(p.purchaseID?._id ?? p.purchaseID) === String(purchaseID));
+  const planFor = (purchaseID) =>
+    plans.find((pl) => String(pl.purchaseID?._id ?? pl.purchaseID) === String(purchaseID));
+
+  async function payInstallment(plan, idx) {
+    setBusyId(`${plan._id}:${idx}`);
+    const res = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
+      installmentIndex: idx,
+      method: "cash",
+    });
+    setBusyId(null);
+    if (res.success) {
+      if (res.data?.checkoutUrl) window.open(res.data.checkoutUrl, "_blank", "noopener");
+      toast.success("Installment recorded");
+      load();
+    } else toast.error(res.error || "Failed");
+  }
+
+  async function toggleLineCheck(row, li) {
+    const next = li.checkStatus !== "checked";
+    setBusyId(li._id);
+    const res = await api.patch(`/api/purchase/${row._id}/line/${li._id}/check`, { checked: next });
+    setBusyId(null);
+    if (res.success) { load(); }
+    else toast.error(res.error || "Failed");
+  }
+
+  const checkSummary = (row) => {
+    const items = row.lineItems || [];
+    const done = items.filter((li) => li.checkStatus === "checked").length;
+    return { done, total: items.length };
+  };
+
+  async function collectCash(row) {
+    const due = Number(row.amountDue ?? row.total ?? 0);
+    if (due <= 0) return;
+    if (!window.confirm(`Record a cash payment of $${due.toFixed(2)} for "${row.name}"?`)) return;
+    setBusyId(row._id);
+    const res = await api.post("/api/payment", {
+      customerID,
+      purchaseID: row._id,
+      type: "event_purchase",
+      amount: due,
+      method: "cash",
+      notes: row.name,
+    });
+    setBusyId(null);
+    if (res.success) { toast.success("Payment recorded"); load(); }
+    else toast.error(res.error || "Failed to record payment");
+  }
+
+  const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const badge = (s) => ({
+    paid: "bg-success/10 text-success",
+    partial: "bg-amber-500/10 text-amber-600",
+    unpaid: "bg-muted text-muted-foreground",
+  }[s] || "bg-muted text-muted-foreground");
+
+  if (loading)
+    return (
+      <div className="flex items-center justify-center py-16">
+        <LoadingSpinner />
+      </div>
+    );
+
+  return (
+    <div className="space-y-4">
+      <p className="text-[13px] text-muted-foreground">
+        {rows.length} purchase{rows.length !== 1 ? "s" : ""}
+      </p>
+
+      {rows.length === 0 ? (
+        <div className="rounded-xl border border-border bg-card py-16 text-center text-[13px] text-muted-foreground">
+          No events or purchases yet. Create one from Setup → “Create Event &amp; Purchase”.
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-border bg-muted/30">
+                {["Date", "Purchase", "Event Type", "Total", "Paid", "Due", "Billing", "Check", ""].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const due = Number(r.amountDue ?? r.total ?? 0);
+                const open = expandedId === r._id;
+                const lineItems = r.lineItems || [];
+                const rowPayments = paymentsFor(r._id);
+                return (
+                  <Fragment key={r._id}>
+                    <tr
+                      className={`${i > 0 ? "border-t border-border" : ""} hover:bg-muted/20 cursor-pointer`}
+                      onClick={() => setExpandedId(open ? null : r._id)}
+                    >
+                      <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{r.createdAt ? new Date(r.createdAt).toLocaleDateString() : "—"}</td>
+                      <td className="px-4 py-2.5 font-medium">
+                        <span className="inline-flex items-center gap-1.5">
+                          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
+                          {r.name}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-muted-foreground">{r.eventTypeID?.name || "—"}</td>
+                      <td className="px-4 py-2.5 tabular-nums">{money(r.total)}</td>
+                      <td className="px-4 py-2.5 tabular-nums text-success">{money(r.amountPaid)}</td>
+                      <td className="px-4 py-2.5 tabular-nums">{money(due)}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${badge(r.billingStatus)}`}>
+                          {r.billingStatus || "unpaid"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const { done, total } = checkSummary(r);
+                          const all = total > 0 && done === total;
+                          return (
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${all ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>
+                              {done}/{total} checked
+                            </span>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        {due > 0 && (
+                          <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" disabled={busyId === r._id} onClick={() => collectCash(r)}>
+                            {busyId === r._id ? "…" : "Collect cash"}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr className="border-t border-border bg-muted/20">
+                        <td colSpan={9} className="px-4 py-4">
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Line items</p>
+                              <div className="rounded-lg border border-border bg-card overflow-hidden">
+                                <table className="w-full text-[12px]">
+                                  <thead>
+                                    <tr className="bg-muted/40 text-left text-[10px] uppercase text-muted-foreground">
+                                      <th className="px-2.5 py-1.5">Item</th>
+                                      <th className="px-2.5 py-1.5 text-right">Qty</th>
+                                      <th className="px-2.5 py-1.5 text-right">Price</th>
+                                      <th className="px-2.5 py-1.5 text-right">Disc.</th>
+                                      <th className="px-2.5 py-1.5 text-right">Total</th>
+                                      <th className="px-2.5 py-1.5">Check</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {lineItems.length === 0 ? (
+                                      <tr><td colSpan={6} className="px-2.5 py-3 text-center text-muted-foreground">No line items.</td></tr>
+                                    ) : lineItems.map((li) => (
+                                      <tr key={li._id} className="border-t border-border">
+                                        <td className="px-2.5 py-1.5">{li.name}</td>
+                                        <td className="px-2.5 py-1.5 text-right tabular-nums">{li.quantity}</td>
+                                        <td className="px-2.5 py-1.5 text-right tabular-nums">{money(li.unitPrice)}</td>
+                                        <td className="px-2.5 py-1.5 text-right tabular-nums">{li.discount ? money(li.discount) : "—"}</td>
+                                        <td className="px-2.5 py-1.5 text-right tabular-nums font-medium">{money(li.total)}</td>
+                                        <td className="px-2.5 py-1.5">
+                                          {li.checkStatus === "checked" ? (
+                                            <button type="button" disabled={busyId === li._id} onClick={() => toggleLineCheck(r, li)}
+                                              className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success hover:opacity-80">
+                                              ✓ {li.checkedAt ? new Date(li.checkedAt).toLocaleDateString() : "checked"}
+                                            </button>
+                                          ) : li.eventDate ? (
+                                            <span className="text-[10px] text-muted-foreground" title="Auto-checks after this time">
+                                              auto · {new Date(li.eventDate).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}
+                                            </span>
+                                          ) : (
+                                            <button type="button" disabled={busyId === li._id} onClick={() => toggleLineCheck(r, li)}
+                                              className="rounded border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted/60">
+                                              {busyId === li._id ? "…" : "Mark checked"}
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {r.notes && <p className="mt-2 text-[12px] text-muted-foreground">Note: {r.notes}</p>}
+                            </div>
+
+                            <div className="flex flex-col gap-4">
+                              {(() => {
+                                const plan = planFor(r._id);
+                                if (!plan) return null;
+                                return (
+                                  <div>
+                                    <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                      Payment schedule · {plan.status}
+                                    </p>
+                                    <div className="rounded-lg border border-border bg-card divide-y divide-border">
+                                      {(plan.installments || []).map((inst, idx) => (
+                                        <div key={idx} className="flex items-center justify-between px-3 py-2 text-[12px]">
+                                          <span className="text-muted-foreground">
+                                            #{idx + 1} · {inst.dueDate ? new Date(inst.dueDate).toLocaleDateString() : "—"}
+                                          </span>
+                                          <span className="flex items-center gap-2">
+                                            <span className="tabular-nums font-medium">{money(inst.amount)}</span>
+                                            {inst.status === "paid" ? (
+                                              <span className="text-success text-[10px] font-medium">paid</span>
+                                            ) : inst.status === "payment_pending" ? (
+                                              <span className="text-amber-600 text-[10px] font-medium">pending</span>
+                                            ) : (
+                                              <button type="button" disabled={busyId === `${plan._id}:${idx}`}
+                                                onClick={() => payInstallment(plan, idx)}
+                                                className="rounded border border-border px-2 py-0.5 text-[10px] font-medium hover:bg-muted/60">
+                                                {busyId === `${plan._id}:${idx}` ? "…" : "Record"}
+                                              </button>
+                                            )}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
+                              <div>
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Payments</p>
+                                {rowPayments.length === 0 ? (
+                                  <p className="text-[12px] text-muted-foreground">No payments recorded against this purchase yet.</p>
+                                ) : (
+                                  <div className="rounded-lg border border-border bg-card divide-y divide-border">
+                                    {rowPayments.map((p) => (
+                                      <div key={p._id} className="flex items-center justify-between px-3 py-2 text-[12px]">
+                                        <span className="text-muted-foreground">
+                                          {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : "—"} · {p.method}
+                                          {p.status !== "completed" ? ` (${p.status})` : ""}
+                                        </span>
+                                        <span className="tabular-nums font-medium">{money(p.amount)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {r.sourceTemplateID?.name && (
+                                  <p className="mt-2 text-[12px] text-muted-foreground">From template: {r.sourceTemplateID.name}</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        Card &amp; wallet payments: use “Create Event &amp; Purchase”, or record them from Payment History.
+      </p>
     </div>
   );
 }
@@ -7852,14 +8145,12 @@ export default function CustomerDetailPage() {
                 <h1 className="text-xl font-semibold text-foreground truncate">
                   {customer.name}
                 </h1>
-                <span
-                  className={[
-                    "inline-flex flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                    customerLifecycleBadgeClass(customer.lifecycleStatus),
-                  ].join(" ")}
+                <StatusColorBadge
+                  color={customerLifecycleColor(customer.lifecycleStatus)}
+                  className="flex-shrink-0 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                 >
                   {customerLifecycleLabel(customer.lifecycleStatus)}
-                </span>
+                </StatusColorBadge>
               </div>
               <p className="text-[13px] text-muted-foreground truncate">
                 {customer.email}
@@ -7913,6 +8204,7 @@ export default function CustomerDetailPage() {
             />
           )}
           {tab === "wallet" && <CustomerWalletTab customerID={customer._id} />}
+          {tab === "purchases" && <PurchasesTab customerID={customer._id} />}
           {tab === "payments" && <PaymentsTab customerID={customer._id} />}
           {tab === "lessons" && <LessonsTab customer={customer} />}
           {tab === "history" && <HistoryTab customer={customer} />}

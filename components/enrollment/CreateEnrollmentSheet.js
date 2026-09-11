@@ -6,12 +6,15 @@ import SearchableSelect from '@/components/ui/searchable-select'
 import NewEnrollmentPackageInline from '@/app/calendar/components/NewEnrollmentPackageInline'
 import AssignMembershipForm from '@/components/membership/AssignMembershipForm'
 import api from '@/lib/api'
+import { dateInputToISO } from '@/lib/studioLocalDate'
 
 const SHEET_WIDTH = '640px'
 
 export default function CreateEnrollmentSheet({
   open,
   onClose,
+  /** 'service' | 'package' | 'membership' — which tab to open on. */
+  initialMode = 'service',
   /** When set, student is fixed and the selector is hidden. */
   customerID: fixedCustomerID = null,
   customerName = '',
@@ -23,7 +26,11 @@ export default function CreateEnrollmentSheet({
 }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [mode, setMode] = useState('service')
+  const [mode, setMode] = useState(initialMode)
+
+  useEffect(() => {
+    if (open) setMode(initialMode)
+  }, [open, initialMode])
   const [selectedCustomerID, setSelectedCustomerID] = useState('')
   const [teacherOptions, setTeacherOptions] = useState([])
   const [customerOptions, setCustomerOptions] = useState([])
@@ -247,7 +254,7 @@ export default function CreateEnrollmentSheet({
         const payRes = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
           installmentIndex: firstPending,
           method,
-          paymentDate: payload.billing?.collectDate || undefined,
+          paymentDate: dateInputToISO(payload.billing?.collectDate),
         })
         if (!payRes?.success) {
           setError(payRes?.error || 'Enrollment created but first installment payment failed.')
@@ -263,7 +270,7 @@ export default function CreateEnrollmentSheet({
         type: 'package_purchase',
         amount: collectAmount,
         method,
-        paymentDate: payload.billing?.collectDate || undefined,
+        paymentDate: dateInputToISO(payload.billing?.collectDate),
       })
       if (!payRes?.success) {
         setError(payRes?.error || 'Enrollment created but initial payment failed.')

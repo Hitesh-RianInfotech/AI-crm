@@ -24,12 +24,8 @@ import {
   formatFieldDisplayValue,
   formatReasonLabel,
 } from '@/lib/dynamic-list-normalize'
-import { formatLeadStageLabel, getLeadStageBadgeClass } from '@/lib/lead-stages'
-
-function stageTone(stage) {
-  // Keep a border so the dialog chip still looks outlined.
-  return `${getLeadStageBadgeClass(stage)} border border-transparent`
-}
+import { formatLeadStageLabel, getLeadStageColor, useLeadStages } from '@/lib/lead-stages'
+import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
 function avatarTone(name = '') {
   const palette = [
@@ -101,6 +97,7 @@ export default function MemberLeadViewDialog({
   leadReasons = [],
   locations = [],
 }) {
+  const { stages: stageOptions } = useLeadStages()
   const [lead, setLead] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -169,9 +166,12 @@ export default function MemberLeadViewDialog({
                 <div className="truncate text-[22px] font-bold text-foreground">{leadName}</div>
                 <div className="mt-1 flex flex-wrap gap-2">
                   {lead.stage && (
-                    <span className={cn('inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold', stageTone(lead.stage))}>
-                      {formatLeadStageLabel(lead.stage)}
-                    </span>
+                    <StatusColorBadge
+                      color={getLeadStageColor(lead.stage, stageOptions)}
+                      className="border border-transparent px-2.5 py-1 text-[11px] font-semibold"
+                    >
+                      {formatLeadStageLabel(lead.stage, stageOptions)}
+                    </StatusColorBadge>
                   )}
                   {lead.bookingStatus && (
                     <span

@@ -18,7 +18,8 @@ import LeadsDialog from '@/app/leads/components/LeadsDialog'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import api from '@/lib/api'
 import { cn, formatDate } from '@/lib/utils'
-import { useLeadStages, formatLeadStageLabel, getLeadStageBadgeClass } from '@/lib/lead-stages'
+import { useLeadStages, formatLeadStageLabel, getLeadStageColor } from '@/lib/lead-stages'
+import StatusColorBadge from '@/components/shared/StatusColorBadge'
 
 const ROWS_PER_PAGE = 10
 
@@ -404,14 +405,12 @@ export default function CallbackReportPage() {
                     </TableCell>
                     {tab === 'leads' && (
                       <TableCell className="py-3 px-4">
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                            getLeadStageBadgeClass(row.stage)
-                          )}
+                        <StatusColorBadge
+                          color={getLeadStageColor(row.stage, stageOptions)}
+                          className="px-2.5 py-0.5 text-xs font-medium"
                         >
                           {formatLeadStageLabel(row.stage, stageOptions) || 'New'}
-                        </span>
+                        </StatusColorBadge>
                       </TableCell>
                     )}
                     <TableCell className="py-3 px-4">

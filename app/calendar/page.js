@@ -373,7 +373,6 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
     let sessionsRemaining = null;
     let totalSessions = null;
     let sessionsPaidFor = null;
-    let sessionsUsedForPaidCheck = null;
     let pkgFullyPaid = false;
     if (Array.isArray(appt.charges) && appt.charges.length > 0) {
       // Membership session-type charges
@@ -391,11 +390,24 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
       if (pkgCharge) {
         const billingType = appt.packageBillingType ?? null;
         const enrollmentPkg = pkgCharge?.enrollmentID?.package ?? null;
-        const amountCollected = enrollmentPkg?.amountCollected ?? 0;
-        const totalPaid = enrollmentPkg?.totalPaid ?? 0;
+        // Where the money actually lives: an enrollment's package, or the package
+        // itself on a direct purchase. Same resolution deriveEventPaid uses on the
+        // customer's Lessons tab, so the two screens agree about one booking.
+        const billingPkg = enrollmentPkg ?? pkgCharge?.customerPackageID ?? null;
+        const amountCollected = billingPkg?.amountCollected ?? 0;
+        const totalPaid = billingPkg?.totalPaid ?? 0;
         pkgFullyPaid =
-          enrollmentPkg?.paymentStatus === "paid" ||
+          billingPkg?.paymentStatus === "paid" ||
           (amountCollected > 0 && amountCollected >= totalPaid);
+
+        // Positive evidence that the package has NOT been settled — an explicit
+        // non-paid status, or (when the backend sent none) a collected figure short
+        // of the price. Missing data leaves the "settled at purchase" assumption
+        // alone rather than flipping every one-time booking to Unpaid; a $0 package
+        // has nothing to settle and stays paid.
+        const packageUnderpaid = billingPkg?.paymentStatus
+          ? billingPkg.paymentStatus !== "paid"
+          : totalPaid > 0 && amountCollected < totalPaid;
 
         // A service is "free" when non-chargeable or fully discounted — it has no
         // credits, only sessions, and must be excluded from the paid-credit math.
@@ -406,28 +418,34 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
           if (isFreeSvc(svc)) return null;
           const sessTotal = (svc.sessionsUsed ?? 0) + (svc.sessionsRemaining ?? 0);
           const bt = billingType ?? enrollmentPkg?.billingType;
-          if (bt === "flexible" || bt === "payment_plan") {
-            // Mirror the customer-profile calc: split the collected amount across
-            // paid (non-free) services by their share of the package price, then
-            // convert this service's share to sessions at its post-discount price.
-            const grossOf = (s) =>
-              ((s.sessionsUsed ?? 0) + (s.sessionsRemaining ?? 0)) *
-              Number(s.pricePerSession || 0);
-            const chargeablePriceTotal = (services ?? []).reduce(
-              (sum, s) => sum + (isFreeSvc(s) ? 0 : grossOf(s)),
-              0,
-            );
-            const svcShare =
-              chargeablePriceTotal > 0 ? grossOf(svc) / chargeablePriceTotal : 1;
-            const svcAmountPaid = amountCollected * svcShare;
-            const effectivePps =
-              sessTotal > 0 && Number(svc.finalAmount) > 0
-                ? Number(svc.finalAmount) / sessTotal
-                : Number(svc.pricePerSession || 0);
-            if (effectivePps <= 0) return null;
-            return svcAmountPaid / effectivePps;
+          // A one-time / pay-per-session package is settled at purchase, so every
+          // session it holds is a paid credit — but only while it really is settled.
+          // Once it is partly collected or refunded it accrues credits from the money
+          // actually taken, exactly like an installment package. Without this, an
+          // enrollment showing $300 collected of $4350 with $4050 refunded still
+          // reported all 30 of its bookings as "Paid" on the calendar.
+          if (bt !== "flexible" && bt !== "payment_plan" && !packageUnderpaid) {
+            return sessTotal;
           }
-          return sessTotal;
+          // Mirror the customer-profile calc: split the collected amount across
+          // paid (non-free) services by their share of the package price, then
+          // convert this service's share to sessions at its post-discount price.
+          const grossOf = (s) =>
+            ((s.sessionsUsed ?? 0) + (s.sessionsRemaining ?? 0)) *
+            Number(s.pricePerSession || 0);
+          const chargeablePriceTotal = (services ?? []).reduce(
+            (sum, s) => sum + (isFreeSvc(s) ? 0 : grossOf(s)),
+            0,
+          );
+          const svcShare =
+            chargeablePriceTotal > 0 ? grossOf(svc) / chargeablePriceTotal : 1;
+          const svcAmountPaid = amountCollected * svcShare;
+          const effectivePps =
+            sessTotal > 0 && Number(svc.finalAmount) > 0
+              ? Number(svc.finalAmount) / sessTotal
+              : Number(svc.pricePerSession || 0);
+          if (effectivePps <= 0) return null;
+          return svcAmountPaid / effectivePps;
         };
 
         // Try customerPackageID first
@@ -437,7 +455,6 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
           if (svc) {
             sessionsRemaining = svc.sessionsRemaining ?? null;
             totalSessions = (svc.sessionsUsed ?? 0) + (svc.sessionsRemaining ?? 0);
-            sessionsUsedForPaidCheck = svc.sessionsUsed ?? 0;
             sessionsPaidFor = resolveSessionsPaidFor(svc, pkg.services);
           }
         }
@@ -447,7 +464,6 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
           if (svc) {
             sessionsRemaining = svc.sessionsRemaining ?? null;
             totalSessions = (svc.sessionsUsed ?? 0) + (svc.sessionsRemaining ?? 0);
-            sessionsUsedForPaidCheck = svc.sessionsUsed ?? 0;
             sessionsPaidFor = resolveSessionsPaidFor(svc, enrollmentPkg.services);
           }
         }
@@ -531,9 +547,10 @@ function transformAppointments(appointments, colorMap, memberSelections = {}, me
     // resolved; sessionsBeforeFromHistory is only the fallback for an event
     // whose package charge/order couldn't be matched at all. A session is
     // "paid" once it has at least ~one full credit (≥ 0.9, allowing for
-    // rounding). This unifies every billing type: one-time/upfront packages
-    // pay for all sessions at purchase (full credits), while flexible/
-    // payment-plan accrue credits as money is collected.
+    // rounding). This unifies every billing type: a settled one-time/upfront
+    // package pays for all sessions at purchase (full credits), while flexible/
+    // payment-plan — and any package left partly collected or refunded — accrue
+    // credits from the money actually taken.
     const sessionsBefore =
       pkgSessionNumber != null ? pkgSessionNumber - 1 : sessionsBeforeFromHistory;
     const coveredByCredits = sessionsPaidFor != null && sessionsPaidFor - sessionsBefore >= 0.999;
@@ -938,6 +955,8 @@ const EVENT_TYPE_LABEL = {
 const STATUS_STYLES = {
   scheduled: { bg: "bg-info/10", text: "text-info", label: "Scheduled" },
   completed: { bg: "bg-success/10", text: "text-success", label: "Completed" },
+  cancelled:          { bg: "bg-muted", text: "text-muted-foreground", label: "Cancelled" },
+  no_show:            { bg: "bg-warning/10", text: "text-warning", label: "No Show" },
   cancelled_no_charge:{ bg: "bg-muted", text: "text-muted-foreground", label: "Cancelled" },
   cancelled_charged: { bg: "bg-destructive/10", text: "text-destructive", label: "Cancelled – Charged" },
   no_show_no_charge:  { bg: "bg-warning/10", text: "text-warning", label: "No Show" },
@@ -967,8 +986,10 @@ function TypeBadge({ type }) {
   );
 }
 
+// Only the exceptional states earn a chip badge: "Scheduled" and "Completed" are
+// what almost every lesson is, so badging them buries the one that isn't.
 function StatusBadge({ status }) {
-  if (!status || status === "scheduled") return null;
+  if (!status || status === "scheduled" || status === "completed") return null;
   const s = STATUS_STYLES[status];
   if (!s) return null;
   return (
@@ -1620,6 +1641,7 @@ function AppointmentTimedEventRows({ event, compact = false }) {
     isUnallocated,
   } = ep;
   const cancelled =
+    effectiveStatus === "cancelled" ||
     effectiveStatus === "cancelled_no_charge" ||
     effectiveStatus === "cancelled_charged";
 
@@ -1717,6 +1739,7 @@ function AppointmentTimedEventRows({ event, compact = false }) {
       <div
         className={`flex items-center gap-1 shrink-0 mt-auto min-w-0 pt-px ${compact ? "flex-nowrap overflow-hidden pr-[54px]" : "flex-wrap"}`}
       >
+        <StatusBadge status={effectiveStatus} />
         {isUnallocated && (
           <span
             className="shrink-0 inline-flex items-center text-[8px] font-semibold rounded px-1 py-0.5 leading-none bg-warning/25 text-warning"

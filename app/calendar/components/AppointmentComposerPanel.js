@@ -9,7 +9,6 @@ import {
   Clock,
   Plus,
   RefreshCw,
-  Search,
   User,
   Users,
 } from "lucide-react";
@@ -17,7 +16,7 @@ import api from "@/lib/api";
 import { getEffectiveBranch } from "@/lib/auth";
 import { studioWallTimeToUtcISO } from "@/lib/studio-time";
 import { validateRecurrence } from "@/lib/recurrence";
-import { toStudioLocalDate } from "@/lib/studioLocalDate";
+import { toStudioLocalDate, dateInputToISO } from "@/lib/studioLocalDate";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import MultiSelectCheckboxDropdown from "@/components/shared/MultiSelectCheckboxDropdown";
 import NewEnrollmentPackageInline from "@/app/calendar/components/NewEnrollmentPackageInline";
@@ -472,16 +471,20 @@ function UnallocatedServicePicker({
   onServiceSelect,
   onOpenEnrollmentWizard,
 }) {
-  const [serviceQuery, setServiceQuery] = useState("");
-
-  const showSearch = allServices.length > 5;
-  const filteredServices = useMemo(() => {
-    const q = serviceQuery.trim().toLowerCase();
-    if (!q) return allServices;
-    return allServices.filter((svc) =>
-      `${svc.serviceName || ""} ${svc.serviceCode || ""}`.toLowerCase().includes(q),
-    );
-  }, [allServices, serviceQuery]);
+  // SearchableSelect carries its own search box, so the price rides along in
+  // the label — it is the only per-service detail worth keeping once the rows
+  // collapse into options ("no package charged" is already said above).
+  const serviceOptions = useMemo(
+    () =>
+      allServices.map((svc) => {
+        const name = svc.serviceName || svc.serviceCode;
+        return {
+          value: String(svc._id),
+          label: svc.price > 0 ? `${name} — $${Number(svc.price).toFixed(2)}` : name,
+        };
+      }),
+    [allServices],
+  );
 
   if (allServices.length === 0) {
     return (
@@ -506,63 +509,15 @@ function UnallocatedServicePicker({
 
       <div className="space-y-1">
         <FieldLabel>Service</FieldLabel>
-        {showSearch && (
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={serviceQuery}
-              onChange={(e) => setServiceQuery(e.target.value)}
-              placeholder="Search services…"
-              className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-2 text-[11px] outline-none focus:border-brand"
-            />
-          </div>
-        )}
-        <div className="space-y-1.5">
-          {filteredServices.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border py-4 text-center text-[11px] text-muted-foreground">
-              No services match “{serviceQuery.trim()}”.
-            </p>
-          ) : (
-            filteredServices.map((svc) => {
-            const isSelected = selectedServiceId === String(svc._id);
-            return (
-              <div
-                key={String(svc._id)}
-                onClick={() => onServiceSelect(String(svc._id), svc.color)}
-                className={[
-                  "flex items-center justify-between rounded-lg px-2.5 py-2 cursor-pointer border transition-colors",
-                  isSelected
-                    ? "border-brand bg-brand/10"
-                    : "border-border bg-background hover:bg-muted/40",
-                ].join(" ")}
-              >
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  {svc.color && (
-                    <span
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ background: svc.color }}
-                    />
-                  )}
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-medium truncate">
-                      {svc.serviceName || svc.serviceCode}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground">
-                      Unallocated — no package charged
-                    </p>
-                  </div>
-                </div>
-                {svc.price > 0 && (
-                  <span className="text-[11px] font-semibold text-foreground ml-2 shrink-0">
-                    ${svc.price.toFixed(2)}
-                  </span>
-                )}
-              </div>
-            );
-            })
-          )}
-        </div>
+        <SearchableSelect
+          value={selectedServiceId || ""}
+          onChange={(v) => {
+            const svc = allServices.find((s) => String(s._id) === String(v));
+            if (svc) onServiceSelect(String(svc._id), svc.color);
+          }}
+          options={serviceOptions}
+          placeholder="Select a service…"
+        />
       </div>
 
       <button
@@ -2428,7 +2383,7 @@ export default function AppointmentComposerPanel({
       const payRes = await api.post(`/api/payment-plan/${plan._id}/pay-installment`, {
         installmentIndex: firstPending,
         method,
-        paymentDate: billing.collectDate || undefined,
+        paymentDate: dateInputToISO(billing.collectDate),
       });
       if (!payRes.success) {
         console.error("pay-installment failed", payRes);
@@ -2444,7 +2399,7 @@ export default function AppointmentComposerPanel({
         type: "package_purchase",
         amount: Number(billing.collectAmount),
         method,
-        paymentDate: billing.collectDate || undefined,
+        paymentDate: dateInputToISO(billing.collectDate),
       });
       return payRes.data?.checkoutUrl || null;
     }

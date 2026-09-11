@@ -33,8 +33,11 @@ import GlobalLoader from '@/components/shared/GlobalLoader'
 import ServiceDialog from '@/app/calendar/services/components/ServiceDialog'
 import LessonDialog from '@/app/calendar/lessons/components/LessonDialog'
 import ToDoDialog from '@/app/calendar/todos/components/ToDoDialog'
+import {
+  ProductsTab, EventTypesTab, SavedTemplatesTab, CreateEventPurchaseDialog,
+} from './components/EventsPurchases'
 
-const ROWS_PER_PAGE = 50
+const ROWS_PER_PAGE = 10
 
 // Fetch a package/membership and POST a copy of it, then open the copy's editor.
 async function duplicateCatalogEntity(kind, id, router) {
@@ -88,12 +91,20 @@ function PaginationBar({ currentPage, totalPages, loading, pageSize, setPageSize
   )
 }
 
-const TABS = [
-  { id: 'services', label: 'Services' },
-  { id: 'packages', label: 'Packages' },
-  { id: 'memberships', label: 'Memberships' },
-  { id: 'todos', label: 'To-Dos' },
+const SCHEDULED_TABS = [
+  { id: 'services', label: 'Services', hint: 'Calendar-based offerings' },
+  { id: 'packages', label: 'Packages', hint: 'Bundles of services' },
+  { id: 'memberships', label: 'Memberships', hint: 'Recurring access' },
+  { id: 'todos', label: 'To-Dos', hint: 'Internal tasks' },
 ]
+
+const EVENTS_TABS = [
+  { id: 'products', label: 'Products', hint: 'Sellable items' },
+  { id: 'event-types', label: 'Event Types', hint: 'Competition, recital, retreat…' },
+  { id: 'saved-templates', label: 'Saved Templates', hint: 'Optional pre-filled purchases' },
+]
+
+const TABS = [...SCHEDULED_TABS, ...EVENTS_TABS]
 
 function BoolBadge({ value }) {
   return value
@@ -1111,57 +1122,120 @@ function ToDosTab() {
   )
 }
 
+const GROUPS = [
+  { id: 'scheduled', label: 'Scheduled Offerings', tabs: SCHEDULED_TABS },
+  { id: 'events', label: 'Events & Purchases', tabs: EVENTS_TABS },
+]
+
+function PillTabs({ tabs, activeTab, onSelect }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-full bg-muted p-1 w-fit">
+      {tabs.map((tab) => {
+        const isActive = activeTab === tab.id
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onSelect(tab.id)}
+            className={[
+              'px-5 py-1.5 rounded-full text-sm font-medium transition-all',
+              isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+            ].join(' ')}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function SetupContent() {
   const searchParams = useSearchParams()
-  const [activeTab, setActiveTab] = useState(() => {
+  const initialTab = (() => {
     const tab = searchParams.get('tab')
-    return TABS.find(t => t.id === tab) ? tab : 'services'
-  })
+    return TABS.find((t) => t.id === tab) ? tab : 'services'
+  })()
+  const [activeGroup, setActiveGroup] = useState(
+    () => GROUPS.find((g) => g.tabs.some((t) => t.id === initialTab))?.id || 'scheduled',
+  )
+  const [activeTab, setActiveTab] = useState(initialTab)
+  const [purchaseOpen, setPurchaseOpen] = useState(false)
 
-  return (
-    <div className="min-h-full flex flex-col gap-6">
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <h1 className="text-2xl font-semibold text-foreground tracking-tight">Setup</h1>
-        </div>
-        <p className="text-sm font-normal text-muted-foreground">
-          Configure your studio's services and packages.
-        </p>
-      </div>
+  const group = GROUPS.find((g) => g.id === activeGroup) || GROUPS[0]
 
-      <div className="flex flex-wrap items-center gap-2 rounded-full bg-muted p-1 w-fit">
-        {TABS.map((tab) => {
-          const isActive = activeTab === tab.id
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={[
-                'px-5 py-1.5 rounded-full text-sm font-medium transition-all',
-                isActive
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              ].join(' ')}
-            >
-              {tab.label}
-            </button>
-          )
-        })}
-      </div>
+  function selectGroup(id) {
+    if (id === activeGroup) return
+    setActiveGroup(id)
+    setActiveTab(GROUPS.find((g) => g.id === id).tabs[0].id)
+  }
 
+  const content = (
+    <>
       {activeTab === 'services' && <ServicesTab />}
       {activeTab === 'lessons' && <LessonsTab />}
       {activeTab === 'packages' && <PackagesTab />}
       {activeTab === 'memberships' && <MembershipsTab />}
       {activeTab === 'todos' && <ToDosTab />}
+      {activeTab === 'products' && <ProductsTab />}
+      {activeTab === 'event-types' && <EventTypesTab />}
+      {activeTab === 'saved-templates' && <SavedTemplatesTab />}
+    </>
+  )
+
+  return (
+    <div className="min-h-full flex flex-col gap-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Setup</h1>
+          </div>
+          <p className="text-sm font-normal text-muted-foreground">
+            Configure what your business schedules, sells, and reuses.
+          </p>
+        </div>
+        <Button
+          className="h-9 px-4 rounded-lg bg-brand hover:bg-brand-dark text-brand-foreground text-sm font-medium gap-2 shrink-0"
+          onClick={() => setPurchaseOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
+          Create Event &amp; Purchase
+        </Button>
+      </div>
+
+      {/* Level 1 — group selector */}
+      <div className="flex items-center gap-1 border-b border-border">
+        {GROUPS.map((g) => {
+          const isActive = g.id === activeGroup
+          return (
+            <button
+              key={g.id}
+              type="button"
+              onClick={() => selectGroup(g.id)}
+              className={[
+                '-mb-px px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors',
+                isActive ? 'border-brand text-brand' : 'border-transparent text-muted-foreground hover:text-foreground',
+              ].join(' ')}
+            >
+              {g.label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Level 2 — tabs within the selected group */}
+      <PillTabs tabs={group.tabs} activeTab={activeTab} onSelect={setActiveTab} />
+
+      {content}
+
+      <CreateEventPurchaseDialog open={purchaseOpen} onClose={() => setPurchaseOpen(false)} />
     </div>
   )
 }
 
 export default function SetupPage() {
   return (
-    <MainLayout title="Setup" subtitle="Manage your studio's services, lessons, and packages">
+    <MainLayout title="Setup" subtitle="Configure what your business schedules, sells, and reuses">
       <Suspense>
         <SetupContent />
       </Suspense>

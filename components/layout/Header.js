@@ -187,12 +187,19 @@ import {
   Moon,
   Sun,
   Plus,
+  ChevronDown,
+  ChevronRight,
+  CalendarDays,
+  Layers,
+  Repeat,
+  Ticket,
 } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import BranchSelector from "@/components/shared/BranchSelector";
 import StaffLocationSwitcher from "@/components/shared/StaffLocationSwitcher";
 import CreateEnrollmentSheet from "@/components/enrollment/CreateEnrollmentSheet";
+import { CreateEventPurchaseDialog } from "@/app/settings/setup/components/EventsPurchases";
 import { getCurrentUser, logout } from "@/lib/auth";
 import { getInitials, cn } from "@/lib/utils";
 import { isSuperAdmin, hasPermission } from "@/lib/permissions";
@@ -204,6 +211,53 @@ const INBOX_FILTERS = [
   { value: "teachers", label: "Teachers", countKey: "teachers" },
 ];
 
+const ENROLL_OPTIONS = [
+  {
+    mode: "service",
+    label: "Services",
+    description: "Individual classes and sessions",
+    icon: CalendarDays,
+  },
+  {
+    mode: "package",
+    label: "Packages",
+    description: "Bundled lesson programs",
+    icon: Layers,
+  },
+  {
+    mode: "membership",
+    label: "Memberships",
+    description: "Recurring studio access",
+    icon: Repeat,
+  },
+];
+
+function EnrollMenuItem({ icon: Icon, label, description, onClick }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="group flex w-full items-start gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-[var(--studio-primary-light)]"
+    >
+      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--studio-primary-light)] text-[var(--studio-primary)] ring-1 ring-[var(--studio-primary)]/12 transition-colors group-hover:bg-[var(--studio-primary)] group-hover:text-white group-hover:ring-transparent">
+        <Icon className="h-4 w-4" strokeWidth={1.75} />
+      </span>
+      <span className="min-w-0 flex-1 pt-0.5">
+        <span className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-semibold text-foreground transition-colors group-hover:text-[var(--studio-primary)]">
+            {label}
+          </span>
+          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 opacity-0 -translate-x-1 transition-all group-hover:translate-x-0 group-hover:opacity-100 group-hover:text-[var(--studio-primary)]" />
+        </span>
+        <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 export default function Header({
   title,
   subtitle,
@@ -212,7 +266,11 @@ export default function Header({
 }) {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [createEnrollmentOpen, setCreateEnrollmentOpen] = useState(false);
+  const [enrollMode, setEnrollMode] = useState("service");
+  const [enrollMenuOpen, setEnrollMenuOpen] = useState(false);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
   const profileRef = useRef(null);
+  const enrollRef = useRef(null);
   const user = getCurrentUser();
   const shortName = (user?.name || "").trim().split(/\s+/).filter(Boolean)[0];
   const { theme, setTheme, mounted: themeMounted } = useTheme();
@@ -228,6 +286,18 @@ export default function Header({
       return () => document.removeEventListener("click", handleClickOutside);
     }
   }, [showProfileMenu]);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (enrollRef.current && !enrollRef.current.contains(event.target)) {
+        setEnrollMenuOpen(false);
+      }
+    }
+    if (enrollMenuOpen) {
+      document.addEventListener("click", handleClickOutside);
+      return () => document.removeEventListener("click", handleClickOutside);
+    }
+  }, [enrollMenuOpen]);
   const { inboxCounts } = useInboxHeader();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -465,13 +535,95 @@ export default function Header({
 
               {/* CREATE ENROLLMENT (desktop only) */}
               {hasPermission("calendar", "enrollment", "write") && (
-                <Button
-                  type="button"
-                  className="hidden md:inline-flex h-[38px] rounded-full px-4 text-[13px] font-semibold bg-brand text-brand-foreground hover:bg-brand-dark"
-                  onClick={() => setCreateEnrollmentOpen(true)}
+                <div
+                  className="relative hidden md:block"
+                  ref={enrollRef}
+                  onMouseEnter={() => setEnrollMenuOpen(true)}
+                  onMouseLeave={() => setEnrollMenuOpen(false)}
                 >
-                  <Plus className="h-4 w-4 mr-2" /> Enroll
-                </Button>
+                  <Button
+                    type="button"
+                    className="h-[38px] rounded-full px-4 text-[13px] font-semibold bg-brand text-brand-foreground hover:bg-brand-dark"
+                    onClick={() => setEnrollMenuOpen((v) => !v)}
+                    aria-haspopup="menu"
+                    aria-expanded={enrollMenuOpen}
+                    aria-label="Enroll"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Enroll
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 opacity-80 transition-transform duration-200",
+                        enrollMenuOpen && "rotate-180",
+                      )}
+                    />
+                  </Button>
+
+                  {enrollMenuOpen && (
+                    <div
+                      className="absolute right-0 top-full pt-2 w-[300px] z-50 origin-top-right animate-scale-in"
+                      role="menu"
+                      aria-label="Enrollment options"
+                    >
+                      <div
+                        className="overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground"
+                        style={{
+                          boxShadow:
+                            "var(--bar-glow), 0 18px 40px -18px hsl(var(--foreground) / 0.16)",
+                        }}
+                      >
+                        <div className="px-3.5 pt-3 pb-2">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--studio-primary)]">
+                            New enrollment
+                          </p>
+                          <p className="mt-0.5 text-[12px] text-muted-foreground">
+                            Select an offering type
+                          </p>
+                        </div>
+
+                        <div className="px-1.5 pb-1.5">
+                          {ENROLL_OPTIONS.map((o) => (
+                            <EnrollMenuItem
+                              key={o.mode}
+                              icon={o.icon}
+                              label={o.label}
+                              description={o.description}
+                              onClick={() => {
+                                setEnrollMode(o.mode);
+                                setCreateEnrollmentOpen(true);
+                                setEnrollMenuOpen(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+
+                        <div
+                          className="mx-4 my-0.5 h-px"
+                          style={{
+                            background:
+                              "linear-gradient(90deg, transparent, color-mix(in srgb, var(--studio-primary) 40%, transparent), transparent)",
+                          }}
+                          aria-hidden
+                        />
+
+                        <div className="px-1.5 py-1.5 pb-2">
+                          <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                            Events
+                          </p>
+                          <EnrollMenuItem
+                            icon={Ticket}
+                            label="Event & Purchase"
+                            description="Tickets, recitals, and one-time items"
+                            onClick={() => {
+                              setPurchaseOpen(true);
+                              setEnrollMenuOpen(false);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* USER PROFILE – click to open dropdown with Logout */}
@@ -528,7 +680,12 @@ export default function Header({
 
       <CreateEnrollmentSheet
         open={createEnrollmentOpen}
+        initialMode={enrollMode}
         onClose={() => setCreateEnrollmentOpen(false)}
+      />
+      <CreateEventPurchaseDialog
+        open={purchaseOpen}
+        onClose={() => setPurchaseOpen(false)}
       />
     </>
   );
