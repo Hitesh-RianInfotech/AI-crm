@@ -26,7 +26,7 @@ function SMSPageInner() {
   const tabValue = useMemo(() => activeTab, [activeTab])
 
   return (
-    <MainLayout title="SMS Campaigns" subtitle="Create and manage reusable SMS templates">
+    <MainLayout title="SMS Builder" subtitle="Create and manage reusable SMS templates">
       <div className="h-full min-h-full flex flex-col">
         <Tabs value={tabValue} onValueChange={setActiveTab} className="w-full h-full min-h-full flex flex-col">
           <SmsTemplatesTab
@@ -56,7 +56,7 @@ export default function SMSPage() {
   return (
     <Suspense
       fallback={
-        <MainLayout title="SMS Campaigns" subtitle="Create and manage reusable SMS templates">
+        <MainLayout title="SMS Builder" subtitle="Create and manage reusable SMS templates">
           <div className="flex items-center justify-center py-20">
             <GlobalLoader variant="inline" size="md" />
           </div>

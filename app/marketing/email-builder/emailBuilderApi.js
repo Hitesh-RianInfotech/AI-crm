@@ -4,6 +4,7 @@
 
 import { getApiBaseUrl } from '@/lib/api'
 import { getToken, getEffectiveBranch } from '@/lib/auth'
+import { parseScopedTemplateList } from '@/lib/template-scope'
 
 export function extractCategoriesList(result) {
   const payload = result?.data
@@ -16,21 +17,15 @@ export function extractCategoriesList(result) {
 }
 
 export function extractEmailTemplatesPayload(result) {
-  const payload = result?.data
-  const list = Array.isArray(payload?.emails)
-    ? payload.emails
-    : Array.isArray(payload?.data)
-    ? payload.data
-    : Array.isArray(payload?.data?.emails)
-    ? payload.data.emails
-    : Array.isArray(payload)
-    ? payload
-    : []
-  const pagination = payload?.pagination || payload?.data?.pagination || result?.pagination
+  const parsed = parseScopedTemplateList(result?.data, 'emails')
   return {
-    list: Array.isArray(list) ? list : [],
-    total: pagination?.total ?? (Array.isArray(list) ? list.length : 0),
-    totalPages: pagination?.totalPages ?? pagination?.pages,
+    hasBuckets: parsed.hasBuckets,
+    ownTemplates: parsed.ownTemplates,
+    orgDefaultTemplates: parsed.orgDefaultTemplates,
+    globalTemplates: parsed.globalTemplates,
+    list: parsed.list,
+    total: parsed.total,
+    totalPages: parsed.totalPages,
   }
 }
 

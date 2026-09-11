@@ -6,8 +6,15 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
+import { ADMIN_TEMPLATE_VARIABLES, STUDIO_TEMPLATE_VARIABLES } from '@/lib/template-scope'
 
-const MERGE_TAGS = ['{{name}}', '{{first_name}}', '{{email}}']
+const MERGE_TAGS = [
+  '{{name}}',
+  '{{first_name}}',
+  '{{email}}',
+  ...STUDIO_TEMPLATE_VARIABLES.map((v) => v.name),
+  ...ADMIN_TEMPLATE_VARIABLES.map((v) => v.name),
+]
 
 export default function EmailHtmlPanel({
   htmlBody,

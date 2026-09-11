@@ -10,6 +10,7 @@ import {
   Eye,
   Plus,
   Sparkles,
+  Star,
   Tags,
   Trash2,
 } from 'lucide-react'
@@ -24,6 +25,9 @@ import Switch from '@/components/ui/switch'
 import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { useToast } from '@/components/ui/toast'
 import api from '@/lib/api'
+import { canManageDefaultWorkflows, isSuperAdmin } from '@/lib/permissions'
+import { templateScopeBadge } from '@/lib/template-scope'
+import SetTemplateScopeDialog from '@/components/templates/SetTemplateScopeDialog'
 import SmsCategoriesDialog from './SmsCategoriesDialog'
 import SmsTemplateEditorDialog from './SmsTemplateEditorDialog'
 import SmsTemplatePreviewDialog from './SmsTemplatePreviewDialog'
@@ -44,8 +48,19 @@ const SORT_OPTIONS = [
   { value: 'updatedAt:desc', label: 'Recently updated' },
 ]
 
+const emptyBuckets = () => ({
+  ownTemplates: [],
+  orgDefaultTemplates: [],
+  globalTemplates: [],
+  list: [],
+  hasBuckets: false,
+})
+
 export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataChanged }) {
   const toast = useToast()
+  const manageDefaults = canManageDefaultWorkflows()
+  const superAdmin = isSuperAdmin()
+
   const [categoriesOpen, setCategoriesOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [previewId, setPreviewId] = useState(null)
@@ -58,6 +73,10 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
   const [categorySearch, setCategorySearch] = useState('')
 
   const [templates, setTemplates] = useState([])
+  const [ownTemplates, setOwnTemplates] = useState([])
+  const [orgDefaultTemplates, setOrgDefaultTemplates] = useState([])
+  const [globalTemplates, setGlobalTemplates] = useState([])
+  const [hasBuckets, setHasBuckets] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
@@ -74,6 +93,11 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
   const [deletingId, setDeletingId] = useState(null)
   const [togglingIds, setTogglingIds] = useState(new Set())
   const [heartAnimIds, setHeartAnimIds] = useState(new Set())
+
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
+  const [scopeTarget, setScopeTarget] = useState(null)
+  const [scopeMode, setScopeMode] = useState('promote')
+  const [scopeBusy, setScopeBusy] = useState(false)
 
   const pageNumbers = useMemo(() => {
     if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
@@ -92,6 +116,25 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
     () => categories.reduce((sum, c) => sum + (Number(c.templateCount) || 0), 0),
     [categories]
   )
+
+  const selectableTemplates = hasBuckets ? ownTemplates : templates
+
+  const applyBuckets = useCallback((next) => {
+    setOwnTemplates(next.ownTemplates || [])
+    setOrgDefaultTemplates(next.orgDefaultTemplates || [])
+    setGlobalTemplates(next.globalTemplates || [])
+    setTemplates(next.list || [])
+    setHasBuckets(Boolean(next.hasBuckets))
+  }, [])
+
+  const patchTemplateAcrossBuckets = useCallback((id, updater) => {
+    const match = (t) => String(t?._id || t?.id) === String(id)
+    const mapList = (arr) => (arr || []).map((t) => (match(t) ? updater(t) : t))
+    setOwnTemplates((prev) => mapList(prev))
+    setOrgDefaultTemplates((prev) => mapList(prev))
+    setGlobalTemplates((prev) => mapList(prev))
+    setTemplates((prev) => mapList(prev))
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery), 300)
@@ -144,12 +187,25 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
 
       const result = await api.get(`/api/smsBuilder?${params.toString()}`)
       if (result.success) {
-        const { list, total, totalPages: totalPagesFromApi } = extractSmsTemplatesPayload(result)
+        const extracted = extractSmsTemplatesPayload(result)
+        const {
+          list,
+          ownTemplates: own,
+          orgDefaultTemplates: org,
+          globalTemplates: global,
+          hasBuckets: buckets,
+          total,
+          totalPages: totalPagesFromApi,
+        } = extracted
         const computedPages = Math.ceil(Number(total) / PAGE_SIZE)
         const nextTotalPages = Math.max(
           1,
           Number(totalPagesFromApi) > 0 ? Number(totalPagesFromApi) : computedPages || 1
         )
+        setOwnTemplates(own || [])
+        setOrgDefaultTemplates(org || [])
+        setGlobalTemplates(global || [])
+        setHasBuckets(Boolean(buckets))
         setTemplates(list)
         setTotalCount(Number(total) || 0)
         setTotalPages(nextTotalPages)
@@ -191,6 +247,13 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
     }
   }, [categories, categoriesLoading, selectedCategory, selectedCategoryId, view])
 
+  const resetTemplateState = () => {
+    const empty = emptyBuckets()
+    applyBuckets(empty)
+    setSelectedIds([])
+    setError(null)
+  }
+
   const openCategory = (cat) => {
     setSelectedCategory(cat)
     setView('templates')
@@ -200,16 +263,13 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
     setFavoriteFilter('all')
     setSortValue('createdAt:desc')
     setPage(1)
-    setSelectedIds([])
-    setTemplates([])
-    setError(null)
+    resetTemplateState()
   }
 
   const backToCategories = () => {
     setView('categories')
     setSelectedCategory(null)
-    setTemplates([])
-    setSelectedIds([])
+    resetTemplateState()
     fetchCategories()
   }
 
@@ -218,10 +278,48 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
   }
 
   const toggleSelectAll = () => {
-    const visibleIds = templates.map((t) => t._id).filter(Boolean)
+    const visibleIds = selectableTemplates.map((t) => t._id).filter(Boolean)
     const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id))
     if (allSelected) setSelectedIds((prev) => prev.filter((id) => !visibleIds.includes(id)))
     else setSelectedIds((prev) => [...new Set([...prev, ...visibleIds])])
+  }
+
+  const openScopeDialog = (tpl, mode = 'promote') => {
+    if (!tpl?._id) return
+    setScopeTarget({
+      id: tpl._id,
+      name: tpl.name || '',
+      currentScope: tpl.templateScope ?? null,
+    })
+    setScopeMode(mode)
+    setScopeDialogOpen(true)
+  }
+
+  const confirmScope = async (templateScope) => {
+    const id = scopeTarget?.id
+    if (!id || scopeBusy) return
+    setScopeBusy(true)
+    try {
+      const result = await api.patch(`/api/smsBuilder/${id}/scope`, { templateScope })
+      if (!result.success) {
+        toast.error({
+          title: 'Scope update failed',
+          message: result.error || result.errorData?.message || 'Could not update scope.',
+        })
+        return
+      }
+      toast.success({ title: 'Scope updated', message: 'Template scope saved successfully.' })
+      setScopeDialogOpen(false)
+      setScopeTarget(null)
+      onDataChanged?.()
+      fetchTemplates()
+      fetchCategories()
+    } catch (e) {
+      console.error(e)
+      toast.error({ title: 'Error', message: 'Could not update template scope.' })
+    } finally {
+      setScopeBusy(false)
+    }
   }
 
   const deleteOne = async (tpl) => {
@@ -273,7 +371,7 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
   }
 
   const toggleFavorite = async (tpl) => {
-    if (togglingIds.has(tpl._id)) return
+    if (!tpl?._id || togglingIds.has(tpl._id)) return
     setTogglingIds((prev) => new Set(prev).add(tpl._id))
     setHeartAnimIds((prev) => new Set(prev).add(tpl._id))
     setTimeout(() => {
@@ -284,16 +382,16 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
       })
     }, 400)
     const next = !tpl.isFavorite
-    setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, isFavorite: next } : t)))
+    patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, isFavorite: next }))
     try {
       const result = await api.patch(`/api/smsBuilder/${tpl._id}`, { isFavorite: next })
       if (!result.success) {
-        setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, isFavorite: !next } : t)))
+        patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, isFavorite: !next }))
       } else if (favoriteFilter === 'favorites' && !next) {
         fetchTemplates()
       }
     } catch (e) {
-      setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, isFavorite: !next } : t)))
+      patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, isFavorite: !next }))
     } finally {
       setTogglingIds((prev) => {
         const s = new Set(prev)
@@ -303,20 +401,49 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
     }
   }
 
-  const toggleStatus = async (tpl) => {
-    if (togglingIds.has(tpl._id)) return
+  const toggleStatus = async (tpl, variant = 'own') => {
+    if (!tpl?._id || togglingIds.has(tpl._id)) return
     setTogglingIds((prev) => new Set(prev).add(tpl._id))
+
+    if (variant === 'global') {
+      const prev = tpl.studioActivationStatus
+      const next = prev === 'active' ? 'inactive' : 'active'
+      patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, studioActivationStatus: next }))
+      try {
+        const result = await api.patch(`/api/smsBuilder/${tpl._id}/activation`, { status: next })
+        if (!result.success) {
+          patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, studioActivationStatus: prev }))
+          toast.error({
+            title: 'Activation failed',
+            message: result.error || 'Could not update studio activation.',
+          })
+        } else if (statusFilter !== 'all' && statusFilter !== next) {
+          fetchTemplates()
+        }
+      } catch (e) {
+        patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, studioActivationStatus: prev }))
+        toast.error({ title: 'Error', message: 'Could not update studio activation.' })
+      } finally {
+        setTogglingIds((prevSet) => {
+          const s = new Set(prevSet)
+          s.delete(tpl._id)
+          return s
+        })
+      }
+      return
+    }
+
     const next = tpl.status === 'active' ? 'inactive' : 'active'
-    setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, status: next } : t)))
+    patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, status: next }))
     try {
       const result = await api.patch(`/api/smsBuilder/${tpl._id}`, { status: next })
       if (!result.success) {
-        setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, status: tpl.status } : t)))
+        patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, status: tpl.status }))
       } else if (statusFilter !== 'all' && statusFilter !== next) {
         fetchTemplates()
       }
     } catch (e) {
-      setTemplates((prev) => prev.map((t) => (t._id === tpl._id ? { ...t, status: tpl.status } : t)))
+      patchTemplateAcrossBuckets(tpl._id, (t) => ({ ...t, status: tpl.status }))
     } finally {
       setTogglingIds((prev) => {
         const s = new Set(prev)
@@ -331,6 +458,278 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
     onDataChanged?.()
     if (view === 'templates') fetchTemplates()
   }
+
+  const canEditVariant = (variant) => {
+    if (variant === 'org_default') return manageDefaults
+    if (variant === 'global') return superAdmin
+    return true
+  }
+
+  const showStatusSwitch = (variant) =>
+    variant === 'own' || (variant === 'org_default' && manageDefaults) || variant === 'global'
+
+  const renderTemplateCard = (tpl, index, variant = 'own') => {
+    const categoryName = getSmsTemplateCategoryName(tpl)
+    const isGlobal = variant === 'global'
+    const isOwn = variant === 'own'
+    const isOrgDefault = variant === 'org_default'
+    const isInactive = isGlobal
+      ? tpl.studioActivationStatus !== 'active'
+      : tpl.status === 'inactive'
+    const badge = templateScopeBadge(variant)
+    const canEdit = canEditVariant(variant)
+    const allowSelect = isOwn || !hasBuckets
+
+    return (
+      <Card
+        key={tpl._id}
+        className={cn(
+          'group overflow-hidden border transition-all duration-200 rounded-2xl flex flex-col',
+          'border-border/80 hover:border-primary/40 hover:shadow-lg bg-card',
+          isInactive && 'opacity-75',
+          tpl.isFavorite && isOwn && 'ring-1 ring-red-200/60'
+        )}
+        style={{ animationDelay: `${index * 0.04}s` }}
+      >
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start gap-2">
+                {allowSelect ? (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(tpl._id)}
+                    onChange={() => toggleSelected(tpl._id)}
+                    className="h-4 w-4 mt-1 shrink-0"
+                  />
+                ) : (
+                  <span className="h-4 w-4 mt-1 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <CardTitle className="text-base line-clamp-2 leading-snug">
+                    {tpl.name || 'Untitled template'}
+                  </CardTitle>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    <Badge
+                      variant={isInactive ? 'secondary' : 'default'}
+                      className={cn(
+                        'text-[10px] font-medium',
+                        !isInactive &&
+                          'bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-0'
+                      )}
+                    >
+                      {isInactive ? 'Inactive' : 'Active'}
+                    </Badge>
+                    {badge ? (
+                      <span
+                        className={cn(
+                          'inline-flex h-5 items-center rounded-full px-2 text-[10px] font-semibold',
+                          badge.className
+                        )}
+                      >
+                        {badge.label}
+                      </span>
+                    ) : null}
+                    {categoryName ? (
+                      <Badge variant="outline" className="text-[10px] font-normal">
+                        {categoryName}
+                      </Badge>
+                    ) : null}
+                    {tpl.isFavorite && isOwn ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] text-red-600 border-red-200"
+                      >
+                        Favorite
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-2 line-clamp-4 whitespace-pre-wrap pl-6">
+                {tpl.message || '—'}
+              </p>
+            </div>
+            <div className="flex flex-col items-center gap-1 shrink-0">
+              {showStatusSwitch(variant) ? (
+                <Switch
+                  checked={!isInactive}
+                  onChange={() => toggleStatus(tpl, variant)}
+                  disabled={togglingIds.has(tpl._id)}
+                  title={isInactive ? 'Activate' : 'Deactivate'}
+                  className="disabled:opacity-40 scale-75"
+                />
+              ) : null}
+              {isOwn ? (
+                <button
+                  type="button"
+                  onClick={() => toggleFavorite(tpl)}
+                  disabled={togglingIds.has(tpl._id)}
+                  title={tpl.isFavorite ? 'Remove favorite' : 'Add to favorites'}
+                  className={cn(
+                    'h-8 w-8 flex items-center justify-center rounded-full transition-all',
+                    tpl.isFavorite
+                      ? 'text-red-500 hover:bg-red-50'
+                      : 'text-muted-foreground hover:bg-muted hover:text-red-400'
+                  )}
+                >
+                  <Heart
+                    className={cn(
+                      'h-4 w-4',
+                      tpl.isFavorite && 'fill-current',
+                      heartAnimIds.has(tpl._id) && 'scale-125 transition-transform'
+                    )}
+                  />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="mt-auto pt-0 pb-3 space-y-2">
+          <div className="flex items-center gap-2 px-1">
+            <Button
+              variant="gradient"
+              size="sm"
+              className="text-xs flex-1"
+              onClick={() => setPreviewId(tpl._id)}
+              title="Preview"
+            >
+              <Eye className="h-3.5 w-3.5 mr-1.5" />
+              Preview
+            </Button>
+            {canEdit ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs flex-1"
+                onClick={() => setEditingId(tpl._id)}
+                title="Edit"
+              >
+                <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                Edit
+              </Button>
+            ) : null}
+            {canEdit ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => deleteOne(tpl)}
+                disabled={deletingId === tpl._id}
+                title="Delete"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+          </div>
+
+          {manageDefaults && isOwn ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => openScopeDialog(tpl, 'promote')}
+            >
+              <Star className="h-3.5 w-3.5 mr-1.5" />
+              Mark as default
+            </Button>
+          ) : null}
+
+          {manageDefaults && (isOrgDefault || (isGlobal && superAdmin)) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => openScopeDialog(tpl, 'change')}
+            >
+              Change scope
+            </Button>
+          ) : null}
+
+          {isOrgDefault && !manageDefaults ? (
+            <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+              Organisation template — edit requires Default Workflows permission.
+            </p>
+          ) : null}
+          {isGlobal && !superAdmin ? (
+            <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+              Global template — use the switch to opt your studio in or out.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderSection = ({ title, subtitle, items, variant }) => {
+    if (!items?.length) return null
+    return (
+      <section className="space-y-3">
+        <div>
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <p className="text-sm text-muted-foreground">{subtitle}</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+          {items.map((tpl, index) => renderTemplateCard(tpl, index, variant))}
+        </div>
+      </section>
+    )
+  }
+
+  const renderPagination = () => (
+    <div className="flex flex-col gap-3 pt-2 mt-auto">
+      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+        {pageNumbers.map((n, idx) => {
+          const prev = pageNumbers[idx - 1]
+          const showEllipsis = prev != null && n - prev > 1
+          return (
+            <span key={n} className="inline-flex items-center gap-1.5">
+              {showEllipsis ? (
+                <span className="text-muted-foreground text-sm px-1">…</span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setPage(n)}
+                disabled={loading || n === page}
+                className={cn(
+                  'inline-flex items-center justify-center h-8 min-w-8 px-2 rounded-md text-sm font-medium border transition-colors disabled:opacity-50',
+                  n === page
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background border-border hover:bg-muted/40'
+                )}
+              >
+                {n}
+              </button>
+            </span>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page === 1 || loading}
+        >
+          Previous
+        </Button>
+        <span className="text-sm text-muted-foreground text-center">
+          Page {page} of {totalPages} · {totalCount} templates
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          disabled={page === totalPages || loading}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
     <TabsContent value="templates" className="mt-3 flex-1 min-h-0 flex flex-col gap-5">
@@ -348,6 +747,20 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
         open={!!previewId}
         templateId={previewId}
         onClose={() => setPreviewId(null)}
+      />
+      <SetTemplateScopeDialog
+        open={scopeDialogOpen}
+        busy={scopeBusy}
+        templateName={scopeTarget?.name}
+        currentScope={scopeTarget?.currentScope}
+        mode={scopeMode}
+        entityLabel="SMS template"
+        onClose={() => {
+          if (scopeBusy) return
+          setScopeDialogOpen(false)
+          setScopeTarget(null)
+        }}
+        onConfirm={confirmScope}
       />
 
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -536,9 +949,10 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
                     variant="outline"
                     size="sm"
                     onClick={toggleSelectAll}
-                    disabled={templates.length === 0 || loading}
+                    disabled={selectableTemplates.length === 0 || loading}
                   >
-                    {templates.length > 0 && templates.every((t) => selectedIds.includes(t._id))
+                    {selectableTemplates.length > 0 &&
+                    selectableTemplates.every((t) => selectedIds.includes(t._id))
                       ? 'Unselect visible'
                       : 'Select visible'}
                   </Button>
@@ -596,186 +1010,38 @@ export default function SmsTemplatesTab({ onCreateNew, dataVersion = 0, onDataCh
 
               {!loading && !error && templates.length > 0 && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                    {templates.map((tpl, index) => {
-                      const categoryName = getSmsTemplateCategoryName(tpl)
-                      const isInactive = tpl.status === 'inactive'
-                      return (
-                        <Card
-                          key={tpl._id}
-                          className={cn(
-                            'group overflow-hidden border transition-all duration-200 rounded-2xl flex flex-col',
-                            'border-border/80 hover:border-primary/40 hover:shadow-lg bg-card',
-                            isInactive && 'opacity-75',
-                            tpl.isFavorite && 'ring-1 ring-red-200/60'
-                          )}
-                          style={{ animationDelay: `${index * 0.04}s` }}
-                        >
-                          <CardHeader className="pb-2">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-start gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedIds.includes(tpl._id)}
-                                    onChange={() => toggleSelected(tpl._id)}
-                                    className="h-4 w-4 mt-1 shrink-0"
-                                  />
-                                  <div className="min-w-0">
-                                    <CardTitle className="text-base line-clamp-2 leading-snug">
-                                      {tpl.name || 'Untitled template'}
-                                    </CardTitle>
-                                    <div className="flex flex-wrap gap-1.5 mt-2">
-                                      <Badge
-                                        variant={isInactive ? 'secondary' : 'default'}
-                                        className={cn(
-                                          'text-[10px] font-medium',
-                                          !isInactive &&
-                                            'bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-0'
-                                        )}
-                                      >
-                                        {isInactive ? 'Inactive' : 'Active'}
-                                      </Badge>
-                                      {categoryName ? (
-                                        <Badge variant="outline" className="text-[10px] font-normal">
-                                          {categoryName}
-                                        </Badge>
-                                      ) : null}
-                                      {tpl.isFavorite ? (
-                                        <Badge
-                                          variant="outline"
-                                          className="text-[10px] text-red-600 border-red-200"
-                                        >
-                                          Favorite
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </div>
-                                <p className="text-xs text-muted-foreground mt-2 line-clamp-4 whitespace-pre-wrap pl-6">
-                                  {tpl.message || '—'}
-                                </p>
-                              </div>
-                              <div className="flex flex-col items-center gap-1 shrink-0">
-                                <Switch
-                                  checked={!isInactive}
-                                  onChange={() => toggleStatus(tpl)}
-                                  disabled={togglingIds.has(tpl._id)}
-                                  title={isInactive ? 'Activate' : 'Deactivate'}
-                                  className="disabled:opacity-40 scale-75"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => toggleFavorite(tpl)}
-                                  disabled={togglingIds.has(tpl._id)}
-                                  title={tpl.isFavorite ? 'Remove favorite' : 'Add to favorites'}
-                                  className={cn(
-                                    'h-8 w-8 flex items-center justify-center rounded-full transition-all',
-                                    tpl.isFavorite
-                                      ? 'text-red-500 hover:bg-red-50'
-                                      : 'text-muted-foreground hover:bg-muted hover:text-red-400'
-                                  )}
-                                >
-                                  <Heart
-                                    className={cn(
-                                      'h-4 w-4',
-                                      tpl.isFavorite && 'fill-current',
-                                      heartAnimIds.has(tpl._id) && 'scale-125 transition-transform'
-                                    )}
-                                  />
-                                </button>
-                              </div>
-                            </div>
-                          </CardHeader>
-
-                          <CardContent className="mt-auto pt-0 pb-3">
-                            <div className="flex items-center gap-2 px-1">
-                              <Button
-                                variant="gradient"
-                                size="sm"
-                                className="text-xs flex-1"
-                                onClick={() => setPreviewId(tpl._id)}
-                                title="Preview"
-                              >
-                                <Eye className="h-3.5 w-3.5 mr-1.5" />
-                                Preview
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs flex-1"
-                                onClick={() => setEditingId(tpl._id)}
-                                title="Edit"
-                              >
-                                <Pencil className="h-3.5 w-3.5 mr-1.5" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => deleteOne(tpl)}
-                                disabled={deletingId === tpl._id}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )
-                    })}
-                  </div>
-
-                  <div className="flex flex-col gap-3 pt-2 mt-auto">
-                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                      {pageNumbers.map((n, idx) => {
-                        const prev = pageNumbers[idx - 1]
-                        const showEllipsis = prev != null && n - prev > 1
-                        return (
-                          <span key={n} className="inline-flex items-center gap-1.5">
-                            {showEllipsis ? (
-                              <span className="text-muted-foreground text-sm px-1">…</span>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => setPage(n)}
-                              disabled={loading || n === page}
-                              className={cn(
-                                'inline-flex items-center justify-center h-8 min-w-8 px-2 rounded-md text-sm font-medium border transition-colors disabled:opacity-50',
-                                n === page
-                                  ? 'bg-primary text-primary-foreground border-primary'
-                                  : 'bg-background border-border hover:bg-muted/40'
-                              )}
-                            >
-                              {n}
-                            </button>
-                          </span>
-                        )
+                  {hasBuckets ? (
+                    <div className="space-y-8">
+                      {renderSection({
+                        title: 'Your templates',
+                        subtitle: manageDefaults
+                          ? 'Owned by this branch — mark one as an org or global default to share it.'
+                          : 'Owned by this branch.',
+                        items: ownTemplates,
+                        variant: 'own',
+                      })}
+                      {renderSection({
+                        title: 'Organisation defaults',
+                        subtitle:
+                          'Org-wide templates (all branches). Status is shared — managed with Default Workflows permission.',
+                        items: orgDefaultTemplates,
+                        variant: 'org_default',
+                      })}
+                      {renderSection({
+                        title: 'Global templates',
+                        subtitle:
+                          'Shared across all studios — opt your studio in or out with the switch.',
+                        items: globalTemplates,
+                        variant: 'global',
                       })}
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPage((p) => Math.max(1, p - 1))}
-                        disabled={page === 1 || loading}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-muted-foreground text-center">
-                        Page {page} of {totalPages} · {totalCount} templates
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                        disabled={page === totalPages || loading}
-                      >
-                        Next
-                      </Button>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                      {templates.map((tpl, index) => renderTemplateCard(tpl, index, 'own'))}
                     </div>
-                  </div>
+                  )}
+
+                  {renderPagination()}
                 </>
               )}
             </>

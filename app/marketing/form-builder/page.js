@@ -19,10 +19,16 @@ import StylePanel from '@/components/forms/StylePanel'
 import GlobalStylePanel from '@/components/forms/GlobalStylePanel'
 import GlobalLoader from '@/components/shared/GlobalLoader'
 import { getCurrentUser, getEffectiveBranch } from '@/lib/auth'
-import { hasPermission } from '@/lib/permissions'
+import { canManageDefaultWorkflows, hasPermission, isSuperAdmin } from '@/lib/permissions'
 import LocationSelector, { ALL_BRANCHES_VALUE } from '@/components/shared/LocationSelector'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import SetTemplateScopeDialog from '@/components/templates/SetTemplateScopeDialog'
+import {
+  parseScopedTemplateList,
+  templateScopeBadge,
+  templateScopeVariant,
+} from '@/lib/template-scope'
 import {
   DndContext,
   closestCenter,
@@ -1097,9 +1103,15 @@ function FormsPageInner() {
   const user = getCurrentUser()
   const canWriteForms = hasPermission('marketing', 'forms', 'write')
   const canDeleteForms = hasPermission('marketing', 'forms', 'delete')
+  const manageDefaults = canManageDefaultWorkflows()
+  const superAdmin = isSuperAdmin()
 
   // Forms list (templates view)
   const [forms, setForms] = useState([])
+  const [ownTemplates, setOwnTemplates] = useState([])
+  const [orgDefaultTemplates, setOrgDefaultTemplates] = useState([])
+  const [globalTemplates, setGlobalTemplates] = useState([])
+  const [hasBuckets, setHasBuckets] = useState(false)
   const [formsLoading, setFormsLoading] = useState(false)
   const [formsError, setFormsError] = useState(null)
   const [formsPage, setFormsPage] = useState(1)
@@ -1109,8 +1121,37 @@ function FormsPageInner() {
   const [formsSearchDebounced, setFormsSearchDebounced] = useState('')
   const [heartAnimIds, setHeartAnimIds] = useState(new Set())
   const [togglingIds, setTogglingIds] = useState(new Set())
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false)
+  const [scopeTarget, setScopeTarget] = useState(null)
+  const [scopeMode, setScopeMode] = useState('promote')
+  const [scopeBusy, setScopeBusy] = useState(false)
 
   const FORMS_PAGE_SIZE = 9
+
+  const applyFormBuckets = useCallback((buckets) => {
+    setHasBuckets(Boolean(buckets.hasBuckets))
+    setOwnTemplates(buckets.ownTemplates || [])
+    setOrgDefaultTemplates(buckets.orgDefaultTemplates || [])
+    setGlobalTemplates(buckets.globalTemplates || [])
+    setForms(buckets.list || [])
+  }, [])
+
+  const patchFormInBuckets = useCallback((id, updater) => {
+    const match = (f) => String(f?._id || f?.id) === String(id)
+    const mapList = (arr) => (arr || []).map((f) => (match(f) ? updater(f) : f))
+    setOwnTemplates((prev) => mapList(prev))
+    setOrgDefaultTemplates((prev) => mapList(prev))
+    setGlobalTemplates((prev) => mapList(prev))
+    setForms((prev) => mapList(prev))
+  }, [])
+
+  const removeFormFromBuckets = useCallback((id) => {
+    const keep = (f) => String(f?._id || f?.id) !== String(id)
+    setOwnTemplates((prev) => prev.filter(keep))
+    setOrgDefaultTemplates((prev) => prev.filter(keep))
+    setGlobalTemplates((prev) => prev.filter(keep))
+    setForms((prev) => prev.filter(keep))
+  }, [])
 
   useEffect(() => {
     const t = setTimeout(() => setFormsSearchDebounced(formsSearch), 300)
@@ -1128,16 +1169,18 @@ function FormsPageInner() {
       const params = new URLSearchParams({ page: String(formsPage), limit: String(FORMS_PAGE_SIZE) })
       if (formsSearchDebounced.trim()) params.set('search', formsSearchDebounced.trim())
       const result = await api.get(`/api/formBuilder?${params.toString()}`)
-      const list = Array.isArray(result.data) ? result.data : null
-      if (result.success && list) {
-        const pagination = result.data?.pagination ?? result.pagination
-        const total = pagination?.total ?? list.length
-        const nextTotalPages = Math.max(1, Math.ceil(total / FORMS_PAGE_SIZE))
+      if (result.success) {
+        const parsed = parseScopedTemplateList(result.data ?? result, 'forms')
+        const total = parsed.total ?? parsed.list.length
+        const nextTotalPages = Math.max(
+          1,
+          Number(parsed.totalPages) || Math.ceil(total / FORMS_PAGE_SIZE),
+        )
         if (formsPage > nextTotalPages) {
           setFormsPage(nextTotalPages)
           return
         }
-        setForms(list)
+        applyFormBuckets(parsed)
         setFormsTotalCount(total)
         setFormsTotalPages(nextTotalPages)
       } else {
@@ -1148,7 +1191,7 @@ function FormsPageInner() {
     } finally {
       setFormsLoading(false)
     }
-  }, [formsPage, formsSearchDebounced])
+  }, [formsPage, formsSearchDebounced, applyFormBuckets])
 
   useEffect(() => {
     fetchForms()
@@ -1166,12 +1209,12 @@ function FormsPageInner() {
       })
     }, 400)
     const next = !form.isFavorite
-    setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, isFavorite: next } : f)))
+    patchFormInBuckets(form._id, (f) => ({ ...f, isFavorite: next }))
     try {
       const result = await api.put(`/api/formBuilder/${form._id}`, { isFavorite: next })
-      if (!result.success) setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, isFavorite: !next } : f)))
+      if (!result.success) patchFormInBuckets(form._id, (f) => ({ ...f, isFavorite: !next }))
     } catch {
-      setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, isFavorite: !next } : f)))
+      patchFormInBuckets(form._id, (f) => ({ ...f, isFavorite: !next }))
     } finally {
       setTogglingIds((prev) => {
         const s = new Set(prev)
@@ -1184,19 +1227,78 @@ function FormsPageInner() {
   const toggleFormStatus = async (form) => {
     if (togglingIds.has(form._id)) return
     setTogglingIds((prev) => new Set(prev).add(form._id))
+    const isGlobal = templateScopeVariant(form) === 'global'
+    if (isGlobal) {
+      const prevActivation = form.studioActivationStatus
+      const next = prevActivation === 'active' ? 'inactive' : 'active'
+      patchFormInBuckets(form._id, (f) => ({ ...f, studioActivationStatus: next }))
+      try {
+        const result = await api.patch(`/api/formBuilder/${form._id}/activation`, { status: next })
+        if (!result.success) {
+          patchFormInBuckets(form._id, (f) => ({ ...f, studioActivationStatus: prevActivation }))
+        }
+      } catch {
+        patchFormInBuckets(form._id, (f) => ({ ...f, studioActivationStatus: prevActivation }))
+      } finally {
+        setTogglingIds((prev) => {
+          const s = new Set(prev)
+          s.delete(form._id)
+          return s
+        })
+      }
+      return
+    }
+
     const next = form.status === 'active' ? 'inactive' : 'active'
-    setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, status: next } : f)))
+    patchFormInBuckets(form._id, (f) => ({ ...f, status: next }))
     try {
       const result = await api.put(`/api/formBuilder/${form._id}`, { status: next })
-      if (!result.success) setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, status: form.status } : f)))
+      if (!result.success) patchFormInBuckets(form._id, (f) => ({ ...f, status: form.status }))
     } catch {
-      setForms((prev) => prev.map((f) => (f._id === form._id ? { ...f, status: form.status } : f)))
+      patchFormInBuckets(form._id, (f) => ({ ...f, status: form.status }))
     } finally {
       setTogglingIds((prev) => {
         const s = new Set(prev)
         s.delete(form._id)
         return s
       })
+    }
+  }
+
+  const openScopeDialog = (form, mode = 'promote') => {
+    setScopeTarget({
+      id: form._id,
+      name: form.name || '',
+      currentScope: form.templateScope ?? null,
+    })
+    setScopeMode(mode)
+    setScopeDialogOpen(true)
+  }
+
+  const confirmFormScope = async (templateScope) => {
+    const id = scopeTarget?.id
+    if (!id || scopeBusy) return
+    setScopeBusy(true)
+    try {
+      const result = await api.patch(`/api/formBuilder/${id}/scope`, { templateScope })
+      if (result.success) {
+        setScopeDialogOpen(false)
+        setScopeTarget(null)
+        const label =
+          templateScope === 'global'
+            ? 'Global template'
+            : templateScope === 'organization_default'
+              ? 'Organisation default'
+              : 'regular form'
+        toast.success({ title: 'Scope updated', message: `Form scope set to ${label}.` })
+        await fetchForms()
+      } else {
+        toast.error({ title: 'Scope update failed', message: result.error || 'Could not update scope.' })
+      }
+    } catch {
+      toast.error({ title: 'Error', message: 'Could not update form scope.' })
+    } finally {
+      setScopeBusy(false)
     }
   }
 
@@ -1786,7 +1888,7 @@ function FormsPageInner() {
       const result = await api.delete(`/api/formBuilder/${form._id}`)
       if (result.success) {
         toast.success({ title: 'Deleted', message: 'Form deleted successfully.' })
-        setForms((prev) => prev.filter((f) => f._id !== form._id))
+        removeFormFromBuckets(form._id)
         setFormsTotalCount((c) => c - 1)
       } else {
         toast.error({ title: 'Delete failed', message: result.error || 'Could not delete form.' })
@@ -3263,6 +3365,207 @@ ${getFormPhoneExportRuntimeScript()}
     ? submitButton 
     : formFields.find((f) => f.id === selectedField)
 
+  const formsEmpty = hasBuckets
+    ? ownTemplates.length === 0 && orgDefaultTemplates.length === 0 && globalTemplates.length === 0
+    : forms.length === 0
+
+  const renderFormCard = (form) => {
+    const variant = templateScopeVariant(form)
+    const isOwn = variant === 'own'
+    const isOrgDefault = variant === 'org_default'
+    const isGlobal = variant === 'global'
+    const badge = templateScopeBadge(variant)
+    const isInactive = isGlobal
+      ? form.studioActivationStatus !== 'active'
+      : form.status === 'inactive'
+    const canEditTemplate = isOrgDefault
+      ? manageDefaults
+      : isGlobal
+        ? superAdmin
+        : true
+    const canDeleteTemplate =
+      canDeleteForms &&
+      (isOwn || (isOrgDefault && manageDefaults) || (isGlobal && superAdmin))
+    const showStatusSwitch = isOwn || (isOrgDefault && manageDefaults) || isGlobal
+    const busy = togglingIds.has(form._id) || cloningFormId === form._id || deletingFormId === form._id
+
+    return (
+      <Card
+        key={form._id}
+        className={cn(
+          'relative hover:shadow-lg transition-all duration-200',
+          isInactive && 'opacity-60',
+        )}
+      >
+        <div className="absolute top-3 right-3 flex items-center gap-1">
+          {badge ? (
+            <span
+              className={cn(
+                'mr-1 inline-flex h-6 items-center rounded-full px-2 text-[10px] font-semibold',
+                badge.className,
+              )}
+            >
+              {badge.label}
+            </span>
+          ) : null}
+          {showStatusSwitch ? (
+            <Switch
+              checked={!isInactive}
+              onChange={() => toggleFormStatus(form)}
+              disabled={busy}
+              title={isInactive ? 'Set active' : 'Set inactive'}
+              className="disabled:opacity-40 scale-75"
+            />
+          ) : null}
+          {isOwn ? (
+            <button
+              type="button"
+              onClick={() => toggleFormFavorite(form)}
+              disabled={busy}
+              title={form.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              className={cn(
+                'h-7 w-7 flex items-center justify-center rounded-full transition-all duration-200 disabled:opacity-40',
+                form.isFavorite
+                  ? 'text-red-500 hover:bg-red-50'
+                  : 'text-muted-foreground hover:bg-muted hover:text-red-400',
+              )}
+            >
+              <Heart
+                className={cn(
+                  'h-4 w-4 transition-all duration-200',
+                  form.isFavorite && 'fill-current',
+                  heartAnimIds.has(form._id) && 'scale-125',
+                )}
+              />
+            </button>
+          ) : null}
+        </div>
+
+        <CardHeader className="pr-24">
+          <div className="flex items-start mb-2 gap-3">
+            <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+              <FileText className="h-6 w-6 text-slate-600" />
+            </div>
+          </div>
+          <CardTitle className="text-lg line-clamp-1">{form.name}</CardTitle>
+          {form.description && (
+            <p className="text-sm text-slate-500 line-clamp-2">{form.description}</p>
+          )}
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-3 mb-4">
+            {form.url && (
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">URL</span>
+                <span className="font-medium text-slate-900 truncate max-w-[160px]">{form.url}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Created</span>
+              <span className="font-medium text-slate-900">{formatDate(form.createdAt)}</span>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            {canEditTemplate ? (
+              <Button
+                variant="gradient"
+                size="sm"
+                className="flex-1"
+                disabled={isOwn && isInactive}
+                onClick={() => importFormIntoBuilder(form)}
+              >
+                <Eye className="h-3.5 w-3.5 mr-1.5" />
+                Preview
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={(isOwn && isInactive) || cloningFormId === form._id || !canWriteForms}
+              onClick={() => cloneForm(form)}
+            >
+              <Copy className="h-3.5 w-3.5 mr-1.5" />
+              {cloningFormId === form._id ? 'Cloning…' : 'Clone'}
+            </Button>
+            {canDeleteTemplate ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => deleteForm(form)}
+                disabled={deletingFormId === form._id}
+                title="Delete"
+              >
+                {deletingFormId === form._id
+                  ? <GlobalLoader variant="inline" size="xs" />
+                  : <Trash2 className="h-3.5 w-3.5" />}
+              </Button>
+            ) : null}
+          </div>
+
+          {manageDefaults && isOwn ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 w-full"
+              disabled={busy}
+              onClick={() => openScopeDialog(form, 'promote')}
+            >
+              <Star className="mr-1.5 h-3.5 w-3.5" />
+              Mark as default
+            </Button>
+          ) : null}
+
+          {manageDefaults && (isOrgDefault || (isGlobal && superAdmin)) ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 w-full"
+              disabled={busy}
+              onClick={() => openScopeDialog(form, 'change')}
+            >
+              Change scope
+            </Button>
+          ) : null}
+
+          {isOrgDefault && !manageDefaults ? (
+            <p className="mt-2 text-[11px] leading-snug text-slate-500">
+              Organisation template — clone to customize for your location.
+            </p>
+          ) : null}
+          {isGlobal && !superAdmin ? (
+            <p className="mt-2 text-[11px] leading-snug text-slate-500">
+              Global template — use the switch to opt your studio in or out. Clone to customize.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const renderFormSection = ({ title, subtitle, items, emptyLabel }) => (
+    <section className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+        <p className="text-sm text-slate-500">{subtitle}</p>
+      </div>
+      {items.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            {emptyLabel}
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {items.map(renderFormCard)}
+        </div>
+      )}
+    </section>
+  )
+
   return (
     <MainLayout
       title="Form Builder"
@@ -3318,7 +3621,7 @@ ${getFormPhoneExportRuntimeScript()}
               </Card>
             )}
 
-            {!formsLoading && !formsError && forms.length === 0 && (
+            {!formsLoading && !formsError && formsEmpty && (
               <Card className="border-dashed">
                 <CardContent className="py-12 text-center">
                   <div className="h-14 w-14 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
@@ -3330,101 +3633,37 @@ ${getFormPhoneExportRuntimeScript()}
               </Card>
             )}
 
-            {!formsLoading && !formsError && forms.length > 0 && (
+            {!formsLoading && !formsError && !formsEmpty && (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {forms.map((form) => {
-                    const isInactive = form.status === 'inactive'
-                    return (
-                      <Card
-                        key={form._id}
-                        className={`relative hover:shadow-lg transition-all duration-200${isInactive ? ' opacity-60' : ''}`}
-                      >
-                        {/* Top-right toggles */}
-                        <div className="absolute top-3 right-3 flex items-center gap-1">
-                          <Switch
-                            checked={!isInactive}
-                            onChange={() => toggleFormStatus(form)}
-                            disabled={togglingIds.has(form._id)}
-                            title={isInactive ? 'Set active' : 'Set inactive'}
-                            className="disabled:opacity-40 scale-75"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => toggleFormFavorite(form)}
-                            disabled={togglingIds.has(form._id)}
-                            title={form.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-                            className={`h-7 w-7 flex items-center justify-center rounded-full transition-all duration-200 disabled:opacity-40 ${
-                              form.isFavorite ? 'text-red-500 hover:bg-red-50' : 'text-muted-foreground hover:bg-muted hover:text-red-400'
-                            }`}
-                          >
-                            <Heart className={`h-4 w-4 transition-all duration-200${form.isFavorite ? ' fill-current' : ''}${heartAnimIds.has(form._id) ? ' scale-125' : ''}`} />
-                          </button>
-                        </div>
-
-                        <CardHeader className="pr-20">
-                          <div className="flex items-start mb-2 gap-3">
-                            <div className="h-12 w-12 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-                              <FileText className="h-6 w-6 text-slate-600" />
-                            </div>
-                          </div>
-                          <CardTitle className="text-lg line-clamp-1">{form.name}</CardTitle>
-                          {form.description && <p className="text-sm text-slate-500 line-clamp-2">{form.description}</p>}
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-3 mb-4">
-                            {form.url && (
-                              <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">URL</span>
-                                <span className="font-medium text-slate-900 truncate max-w-[160px]">{form.url}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between text-sm">
-                              <span className="text-slate-500">Created</span>
-                              <span className="font-medium text-slate-900">{formatDate(form.createdAt)}</span>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="gradient"
-                              size="sm"
-                              className="flex-1"
-                              disabled={isInactive}
-                              onClick={() => importFormIntoBuilder(form)}
-                            >
-                              <Eye className="h-3.5 w-3.5 mr-1.5" />
-                              Preview
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1"
-                              disabled={isInactive || cloningFormId === form._id || !canWriteForms}
-                              onClick={() => cloneForm(form)}
-                            >
-                              <Copy className="h-3.5 w-3.5 mr-1.5" />
-                              {cloningFormId === form._id ? 'Cloning…' : 'Clone'}
-                            </Button>
-                            {canDeleteForms && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => deleteForm(form)}
-                                disabled={deletingFormId === form._id}
-                                title="Delete"
-                              >
-                                {deletingFormId === form._id
-                                  ? <GlobalLoader variant="inline" size="xs" />
-                                  : <Trash2 className="h-3.5 w-3.5" />}
-                              </Button>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
+                {hasBuckets ? (
+                  <div className="space-y-8">
+                    {renderFormSection({
+                      title: 'Your forms',
+                      subtitle: manageDefaults
+                        ? 'Owned by this branch — mark one as an org or global default to share it.'
+                        : 'Owned by this branch.',
+                      items: ownTemplates,
+                      emptyLabel: 'No studio forms yet.',
+                    })}
+                    {renderFormSection({
+                      title: 'Organisation defaults',
+                      subtitle:
+                        'Org-wide templates (all branches). Status is shared — managed with Default Workflows permission.',
+                      items: orgDefaultTemplates,
+                      emptyLabel: 'No organisation default templates yet.',
+                    })}
+                    {renderFormSection({
+                      title: 'Global templates',
+                      subtitle: 'Shared across all studios — opt your studio in or out with the switch.',
+                      items: globalTemplates,
+                      emptyLabel: 'No global templates available yet.',
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {forms.map(renderFormCard)}
+                  </div>
+                )}
 
                 {/* Pagination */}
                 {formsTotalPages > 1 && (
@@ -3452,6 +3691,21 @@ ${getFormPhoneExportRuntimeScript()}
                 )}
               </>
             )}
+
+            <SetTemplateScopeDialog
+              open={scopeDialogOpen}
+              busy={scopeBusy}
+              templateName={scopeTarget?.name}
+              currentScope={scopeTarget?.currentScope}
+              mode={scopeMode}
+              entityLabel="form"
+              onClose={() => {
+                if (scopeBusy) return
+                setScopeDialogOpen(false)
+                setScopeTarget(null)
+              }}
+              onConfirm={confirmFormScope}
+            />
           </div>
         )}
 

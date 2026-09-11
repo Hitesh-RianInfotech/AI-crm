@@ -2,6 +2,8 @@
  * Normalizers for /api/smsBuilder responses.
  */
 
+import { parseScopedTemplateList } from '@/lib/template-scope'
+
 export function extractSmsCategoriesList(result) {
   const payload = result?.data
   const list = Array.isArray(payload?.categories)
@@ -13,20 +15,7 @@ export function extractSmsCategoriesList(result) {
 }
 
 export function extractSmsTemplatesPayload(result) {
-  const payload = result?.data
-  const list = Array.isArray(payload?.smsList)
-    ? payload.smsList
-    : Array.isArray(payload?.data?.smsList)
-      ? payload.data.smsList
-      : Array.isArray(payload)
-        ? payload
-        : []
-  const pagination = payload?.pagination ?? payload?.data?.pagination ?? result?.pagination
-  return {
-    list: Array.isArray(list) ? list : [],
-    total: pagination?.total ?? (Array.isArray(list) ? list.length : 0),
-    totalPages: pagination?.totalPages ?? pagination?.pages,
-  }
+  return parseScopedTemplateList(result?.data, 'smsList')
 }
 
 export function extractSmsTemplateDetail(result) {
